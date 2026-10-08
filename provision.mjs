@@ -18,14 +18,20 @@
  *   CLOUDFLARE_ACCOUNT_ID  from the dashboard, Workers overview
  *   CLOUDFLARE_ZONE_ID     from the dashboard, the zone holding the hostnames
  *
- * Optional environment:
- *   SHARD_COUNT      how many shards (default 13)
- *   SHARD_HOST_BASE   the hostname stem (default s.tiles.<zone name>)
- *   WORKER_PREFIX     Worker name stem (default pmtiles-shard)
- *   ARCHIVE_NAME      archive name in the asset paths (default basemap)
+ * Optional arguments:
+ *   --only N      provision only shard N. Use for a canary: verify one Worker
+ *                 and one Custom Domain work before creating the rest.
+ *   --from N      start at shard N, for resuming after a partial run
+ *   --zones-only  attach the Custom Domains but create no Workers
  *
  * Dry run first. It prints what it would do and touches nothing:
  *   node provision.mjs --dry-run
+ *
+ * The recommended order:
+ *   node provision.mjs --dry-run
+ *   node provision.mjs --only 0
+ *   curl -sI https://s.tiles0.jasontally.com/          # expect 503 placeholder
+ *   node provision.mjs
  */
 
 const API = "https://api.cloudflare.com/client/v4";
@@ -109,7 +115,18 @@ async function main() {
   const shardCount = Number(arg("shards", String(SHARD_COUNT)));
   const zoneName = arg("zone-name", "jasontally.com");
   const hostBase = arg("host-base", "s.tiles");
-  const workers = plan({ shardCount, hostBase, workerPrefix: WORKER_PREFIX, zoneName });
+  const only = arg("only", null);
+  const from = Number(arg("from", "0"));
+  const zonesOnly = process.argv.includes("--zones-only");
+  let workers = plan({ shardCount, hostBase, workerPrefix: WORKER_PREFIX, zoneName });
+  if (only !== null) {
+    workers = workers.filter((worker) => String(worker.index) === String(only));
+    if (workers.length === 0) {
+      console.error(`--only ${only} does not match a shard in 0..${shardCount - 1}`);
+      process.exit(1);
+    }
+  }
+  if (from > 0) workers = workers.filter((worker) => worker.index >= from);
 
   if (dryRun) {
     console.log(`shards   ${workers.length}`);
@@ -156,21 +173,41 @@ async function main() {
     // A Worker with assets and no main still needs a deploy to exist, and
     // there is nothing to deploy yet. So create the Worker with a placeholder
     // and let the shard's own build replace it.
-    if (!names.has(worker.worker)) {
+    if (!zonesOnly && !names.has(worker.worker)) {
+      // The part Content-Type must be application/javascript+module. Three
+      // attempts established this, and each failure looks like a code problem
+      // rather than a header problem:
+      //
+      //   main_module + text/javascript       -> "Uncaught SyntaxError:
+      //                                            Unexpected token 'export'"
+      //   body_part (service worker syntax)    -> "multipart uploads must
+      //                                            contain a readable
+      //                                            body_part, main_module,
+      //                                            or assets"
+      //   main_module, part with no filename   -> "No such module"
+      //
+      // With text/javascript the API parses the part as a service worker
+      // script, so `export default` is a syntax error. The filename must match
+      // main_module. The combination below works.
+      const placeholder = [
+        "// Placeholder. The shard build replaces this with the asset upload.",
+        "export default {",
+        "  fetch() {",
+        "    return new Response('shard not built yet', { status: 503 });",
+        "  },",
+        "};",
+        "",
+      ].join("\n");
+
       const form = new FormData();
       form.set("metadata", JSON.stringify({
         main_module: "placeholder.js",
         bindings: [],
         compatibility_date: "2026-10-07",
-        // Assets are attached by the shard's build, not here, so the Worker
-        // starts empty and the build fills it in.
       }));
       form.set(
         "placeholder.js",
-        new Blob(
-          ["// Placeholder. The shard build replaces this with the asset upload.\nexport default { fetch() { return new Response('shard not built yet', { status: 503 }); } };"],
-          { type: "text/javascript" }
-        ),
+        new Blob([placeholder], { type: "application/javascript+module" }),
         "placeholder.js"
       );
       try {
@@ -184,6 +221,8 @@ async function main() {
         console.error(`FAILED   ${worker.worker}: ${error.message}`);
         continue;
       }
+    } else if (zonesOnly) {
+      console.log(`skipped  ${worker.worker} (--zones-only)`);
     } else {
       console.log(`exists   ${worker.worker}`);
     }
