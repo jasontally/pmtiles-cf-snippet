@@ -407,7 +407,7 @@ Every tile must draw.
 python3 shard-pmtiles.py --selftest   # section planning and byte reconstruction
 node snippet-test.js                  # the snippet against a real split, 20 checks
 node minify-test.js                   # the minifier, 19 checks
-node deploy-test.js                   # the deploy requests, against a mock API, 9 checks
+node deploy-test.js                   # the deploy requests, against a mock API, 13 checks
 ```
 
 `snippet-test.js` splits a small synthetic archive with the real tool, then
@@ -429,17 +429,48 @@ with a test for each case that broke it.
 
 ## 14. Deployment
 
-A push to the default branch runs Workers Builds, which runs `build.mjs`:
+A push to the default branch runs Workers Builds. Two commands run, in order.
+Set these in **Settings > Build**.
 
-1. Split the archive, or reuse the asset tree in `public/`.
-2. Verify every part against the archive.
-3. `wrangler deploy` for the assets.
-4. Minify the snippet, check the size and the export, upload it, and set the
-   rule.
+| Setting | Value |
+|---|---|
+| Build command | `npm run build` |
+| Deploy command | `npm run deploy` |
 
-The API token needs Workers Scripts Edit for the assets and Snippets Edit for the
-snippet. See the header of `build.mjs` for the full list of environment
+`npm run build` is `node build.mjs prepare`. It splits the archive, verifies
+every part against the archive, and minifies the snippet to
+`dist/snippet.min.js`. It deploys nothing.
+
+`npm run deploy` is `node build.mjs deploy`. It uploads the assets, then uploads
+the snippet and sets its rule.
+
+**The deploy command must not stay `npx wrangler deploy`.** Wrangler cannot
+upload a snippet. A snippet is a zone resource, and it needs the Snippets API.
+Running wrangler in the build step as well would upload the asset set twice.
+
+The `name` in `wrangler.jsonc` must match the Worker name in the dashboard, or
+the build fails. It is `pmtiles-cf-snippet`.
+
+The API token needs Workers Scripts Edit for the assets and Snippets Edit for
+the snippet. See the header of `build.mjs` for the full list of environment
 variables.
+
+### 14.1 Preview branches
+
+Preview branches run the preview command, not the deploy command. So a preview
+build uploads no assets and no snippet. A snippet is a zone resource, so a
+preview cannot have its own. A preview Worker serves the part files at its
+`*.tiles.jasontally.com` name, but the zone snippet rule only matches
+`tiles.jasontally.com`, so range requests do not work on previews.
+
+To test a preview, request a part file directly. See test 1 in section 12.
+
+### 14.2 Why the snippet goes second
+
+The snippet answers `tiles.jasontally.com/basemap.pmtiles`. If it went live
+before the parts, every tile request would return `502` until the upload
+finished. Putting it second means the URL only starts answering once the parts
+are in place.
 
 ## 15. Files
 

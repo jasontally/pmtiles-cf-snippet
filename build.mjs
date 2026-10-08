@@ -3,25 +3,22 @@
  * Build and deploy: split the archive, upload the assets, minify and deploy the
  * snippet. Runs on Workers Builds after every push.
  *
- * Steps, in order. Each step stops the script if it fails.
+ * Steps. Each step stops the script if it fails. The mode is argv[2].
  *
- *   1. split    python3 shard-pmtiles.py makes the asset tree. Set
- *               ARCHIVE_PATH to an existing .pmtiles file, or set
- *               ARCHIVE_URL and the script downloads it. When the archive is
- *               missing and DOWNLOAD=0, step 1 is skipped and the asset tree
- *               already on disk is reused.
- *   2. verify   the parts must reproduce the archive byte for byte. This reads
- *               the whole tree twice, so it is skipped when SKIP_VERIFY=1.
- *   3. assets   wrangler deploy uploads the assets. Cloudflare compares content
- *               hashes and does not re-upload unchanged files, so a build that
- *               only changed a few parts uploads only those files.
- *   4. snippet  minify snippet.js, then PUT it to the Snippets API, then PUT the
- *               matching rule.
+ *   prepare   split the archive, verify the parts, minify the snippet. Deploys
+ *             nothing. This is the Workers Builds "build command".
+ *   deploy    upload the assets, then upload the snippet and set its rule.
+ *             This is the Workers Builds "deploy command".
+ *   snippet   upload the snippet only. Use this when the deploy command stays
+ *             "npx wrangler deploy" and the snippet goes in the build step.
+ *   all       prepare then deploy. For running on one machine.
  *
- * Required environment for steps 3 and 4:
- *   CLOUDFLARE_API_TOKEN   needs Workers Scripts Edit (assets) and Snippets Edit
- *   CLOUDFLARE_ACCOUNT_ID  Workers Scripts Edit
- *   CLOUDFLARE_ZONE_ID     Workers Routes, and Snippets Edit
+ * In prepare: set ARCHIVE_PATH to an existing .pmtiles file, or set ARCHIVE_URL
+ * and the script downloads it. With neither, the split is skipped, because the
+ * repository holds no archive and 118 GiB cannot be committed.
+ *
+ * In deploy, CLOUDFLARE_API_TOKEN needs Workers Scripts Edit for the assets and
+ * Snippets Edit for the snippet.
  *
  * Optional environment:
  *   ARCHIVE_PATH           path to the .pmtiles file
@@ -35,7 +32,6 @@
  *   SKIP_SNIPPET           1 to skip the snippet deploy (default: 0)
  *   SNIPPET_NAME           snippet name, a-z 0-9 and _ only (default: pmtiles)
  *   SNIPPET_RULE           rule expression (default matches /<name>.pmtiles)
- *   MINIFY_CMD             command that minifies stdin to stdout
  */
 
 import { spawnSync } from "node:child_process";
@@ -51,6 +47,7 @@ import { Readable } from "node:stream";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, "public");
+const DIST_DIR = join(ROOT, "dist");
 const SNIPPET_SOURCE = join(ROOT, "snippet.js");
 const TOOL = join(ROOT, "shard-pmtiles.py");
 const API = "https://api.cloudflare.com/client/v4";
@@ -115,9 +112,11 @@ function locateArchive() {
 
   const url = env("ARCHIVE_URL", "");
   if (!url) {
-    if (flag("DOWNLOAD", "1")) {
-      fail("set ARCHIVE_PATH or ARCHIVE_URL to give the build an archive");
-    }
+    // No archive is configured. This is the normal state while wiring up: the
+    // repository holds no archive, because 118 GiB cannot be committed, and no
+    // build variable points at one yet. Skip the split and carry on so the
+    // deploy is not blocked. Set ARCHIVE_PATH or ARCHIVE_URL to upload parts.
+    console.log("no ARCHIVE_PATH or ARCHIVE_URL, skipping the split");
     return null;
   }
   if (!flag("DOWNLOAD", "1")) {
@@ -222,6 +221,13 @@ function verify(archive) {
  * Step 3: upload the assets.
  * ---------------------------------------------------------------- */
 
+/**
+ * Upload the assets with wrangler.
+ *
+ * This only runs in "deploy" or "all" mode. In "prepare" mode Workers Builds
+ * runs the deploy command itself, and running wrangler here as well would
+ * upload the asset set twice on every build.
+ */
 function deployAssets() {
   if (flag("SKIP_ASSETS", "0")) {
     console.log("SKIP_ASSETS=1, skipping");
@@ -234,6 +240,8 @@ function deployAssets() {
   }
   requireEnv("CLOUDFLARE_API_TOKEN");
   requireEnv("CLOUDFLARE_ACCOUNT_ID");
+  // Cloudflare compares a content hash per file and skips unchanged ones, so a
+  // build that changed a few parts uploads only those files.
   run("npx", ["--yes", "wrangler@latest", "deploy"], { quiet: false });
 }
 
@@ -375,25 +383,7 @@ async function deploySnippet() {
     fail(`SNIPPET_NAME ${name} must use only a-z, 0-9 and _`);
   }
 
-  const source = readFileSync(SNIPPET_SOURCE, "utf8");
-  const small = minify(source);
-  const rawBytes = Buffer.byteLength(source);
-  const smallBytes = Buffer.byteLength(small);
-  console.log(`snippet ${rawBytes} bytes -> ${smallBytes} bytes`);
-  if (smallBytes > MAX_SNIPPET_BYTES) {
-    fail(
-      `minified snippet is ${smallBytes} bytes, over the ${MAX_SNIPPET_BYTES} ` +
-      `byte limit. Shorten the comments and the ARCHIVES table.`
-    );
-  }
-
-  // Guard against a minifier that broke the code.
-  const probe = `data:text/javascript;base64,${Buffer.from(small).toString("base64")}`;
-  const module = await import(probe);
-  if (typeof module.default?.fetch !== "function") {
-    fail("the minified snippet does not export a default object with fetch()");
-  }
-  console.log("minified snippet parses and exports fetch()");
+  const small = await minifySnippet();
 
   const digest = createHash("sha256").update(small).digest("hex").slice(0, 12);
   console.log(`sha256:${digest}`);
@@ -441,10 +431,10 @@ async function deploySnippet() {
  * Main.
  * ---------------------------------------------------------------- */
 
-async function main() {
-  const started = Date.now();
-  console.log(`build started ${new Date().toISOString()}`);
-
+/**
+ * Prepare: split, verify, minify. Writes dist/snippet.min.js. Deploys nothing.
+ */
+async function prepare() {
   const archive = await locateArchive();
 
   step("split archive into asset files");
@@ -453,15 +443,77 @@ async function main() {
   if (haveAssets) {
     step("verify the asset files");
     verify(archive);
-
-    step("upload the assets");
-    deployAssets();
   } else {
-    console.log("\n=== no asset tree to upload, skipping verify and upload");
+    console.log("\n=== no asset tree, skipping verify");
   }
 
-  step("minify and deploy the snippet");
+  step("minify the snippet");
+  const small = await minifySnippet();
+  mkdirSync(DIST_DIR, { recursive: true });
+  const out = join(DIST_DIR, "snippet.min.js");
+  writeFileSync(out, small);
+  console.log(`wrote ${out} (${Buffer.byteLength(small)} bytes)`);
+  return haveAssets;
+}
+
+/**
+ * Deploy: upload the assets, then upload the snippet and set its rule.
+ * The snippet goes second, so the parts are in place before the URL starts
+ * answering range requests.
+ */
+async function deploy() {
+  step("upload the assets");
+  deployAssets();
+
+  step("deploy the snippet");
   await deploySnippet();
+}
+
+/** Minify, check the size and the export, and return the code. */
+async function minifySnippet() {
+  const name = env("SNIPPET_NAME", "pmtiles");
+  if (!/^[a-z0-9_]+$/.test(name)) {
+    fail(`SNIPPET_NAME ${name} must use only a-z, 0-9 and _`);
+  }
+  const source = readFileSync(SNIPPET_SOURCE, "utf8");
+  const small = minify(source);
+  const rawBytes = Buffer.byteLength(source);
+  const smallBytes = Buffer.byteLength(small);
+  console.log(`snippet ${rawBytes} bytes -> ${smallBytes} bytes`);
+  if (smallBytes > MAX_SNIPPET_BYTES) {
+    fail(
+      `minified snippet is ${smallBytes} bytes, over the ${MAX_SNIPPET_BYTES} ` +
+      `byte limit. Shorten the comments and the ARCHIVES table.`
+    );
+  }
+  const probe = `data:text/javascript;base64,${Buffer.from(small).toString("base64")}`;
+  const module = await import(probe);
+  if (typeof module.default?.fetch !== "function") {
+    fail("the minified snippet does not export a default object with fetch()");
+  }
+  console.log("minified snippet parses and exports fetch()");
+  console.log(`sha256:${createHash("sha256").update(small).digest("hex").slice(0, 12)}`);
+  return small;
+}
+
+async function main(mode) {
+  const started = Date.now();
+  console.log(`build started ${new Date().toISOString()} (mode: ${mode})`);
+
+  if (mode === "prepare") {
+    await prepare();
+  } else if (mode === "deploy") {
+    await deploy();
+  } else if (mode === "snippet") {
+    // For a setup where the deploy command stays "npx wrangler deploy" and the
+    // snippet upload happens in the build step instead.
+    step("deploy the snippet");
+    await deploySnippet();
+  } else {
+    // "all", for running everything on one machine.
+    await prepare();
+    await deploy();
+  }
 
   const seconds = ((Date.now() - started) / 1000).toFixed(1);
   console.log(`\nbuild finished in ${seconds}s`);
@@ -474,7 +526,8 @@ const invokedDirectly = process.argv[1] &&
   resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (invokedDirectly) {
-  main().catch((error) => fail(error.stack || String(error)));
+  const mode = process.argv[2] || "all";
+  main(mode).catch((error) => fail(error.stack || String(error)));
 }
 
 // Exported so deploy-test.js can drive the build against a mock API.

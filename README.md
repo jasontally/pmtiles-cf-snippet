@@ -73,11 +73,34 @@ Or all four: `npm test`.
 
 ## Deploy
 
-Workers Builds runs `node build.mjs` on every push to the default branch. It
-splits, verifies, uploads the assets with wrangler, then minifies and deploys
-the snippet.
+Workers Builds runs two commands on every push. Set these in
+**Settings > Build**:
 
-Secrets to set in the Workers Builds configuration:
+| Setting | Value |
+|---|---|
+| Build command | `npm run build` |
+| Deploy command | `npm run deploy` |
+
+`npm run build` runs `node build.mjs prepare`. It splits the archive, verifies
+every part against the archive byte for byte, and minifies the snippet into
+`dist/snippet.min.js`. It deploys nothing.
+
+`npm run deploy` runs `node build.mjs deploy`. It uploads the assets with
+wrangler, then uploads the snippet and sets its rule. The snippet goes second,
+so the parts are in place before the URL starts answering range requests.
+
+**The deploy command must be `npm run deploy`, not `npx wrangler deploy`.**
+Wrangler cannot upload a snippet. A snippet is a zone resource, not part of a
+Worker, so it needs the Snippets API. If you keep `npx wrangler deploy` as the
+deploy command, set the build command to `npm run build:s snippet` instead. That
+works, but it uploads the snippet before the assets, and a preview build would
+overwrite the production snippet, because preview branches run the build command
+and not the deploy command.
+
+The name in `wrangler.jsonc` must match the Worker name in the dashboard, or the
+build fails. It is `pmtiles-cf-snippet`.
+
+Secrets to set as build secrets:
 
 | Secret | Needed for |
 |---|---|
@@ -87,6 +110,10 @@ Secrets to set in the Workers Builds configuration:
 
 Set the zone in `SNIPPET_RULE`, which defaults to matching `tiles.example.com`.
 See the header of `build.mjs` for every variable.
+
+To upload the asset parts, set `ARCHIVE_URL` to the `.pmtiles` URL or
+`ARCHIVE_PATH` to a file on the build machine. Without either, the build skips
+the split and deploys the snippet only.
 
 ## Notes
 

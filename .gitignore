@@ -2,6 +2,9 @@
 public/
 !public/_headers
 
+# The minified snippet, written by the build.
+dist/
+
 # The archive and any local copy.
 *.pmtiles
 .cache/

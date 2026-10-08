@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -84,7 +84,7 @@ async function mockApi() {
  * here has to stay free to answer the child's requests. A sync spawn would block
  * that loop and the two processes would wait on each other.
  */
-function runBuild(env, apiBase) {
+function runBuild(env, apiBase, mode) {
   const dir = mkdtempSync(join(tmpdir(), "deploy-test-"));
   const shim = join(dir, "shim.mjs");
   writeFileSync(shim, `
@@ -95,7 +95,7 @@ globalThis.fetch = (input, init) => {
   return original(url.replace("https://api.cloudflare.com/client/v4", base), init);
 };
 const { main } = await import(${JSON.stringify(BUILD)});
-await main();
+await main(${JSON.stringify(mode || "all")});
 process.exit(0);
 `);
   return new Promise((resolve) => {
@@ -293,6 +293,59 @@ await check("a non JSON API reply fails clearly", async () => {
   } finally {
     await new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); });
   }
+});
+
+await check("prepare mode deploys nothing", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(CREDENTIALS, api.base, "prepare");
+    assert.equal(run.status, 0, `build failed:\n${run.stdout}\n${run.stderr}`);
+    assert.equal(
+      api.requests.length,
+      0,
+      "prepare must not call the API, otherwise the snippet uploads twice"
+    );
+    // It still minifies, so a size regression fails the build step.
+    assert.match(run.stdout, /snippet \d+ bytes -> \d+ bytes/);
+    assert.match(run.stdout, /minified snippet parses/);
+  } finally {
+    await api.close();
+  }
+});
+
+await check("prepare writes dist/snippet.min.js", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(CREDENTIALS, api.base, "prepare");
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /wrote .*dist\/snippet\.min\.js/);
+  } finally {
+    await api.close();
+  }
+});
+
+await check("a missing archive skips the split instead of failing", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(CREDENTIALS, api.base, "prepare");
+    assert.equal(run.status, 0, `must not fail:\n${run.stderr}`);
+    assert.match(
+      run.stdout,
+      /no ARCHIVE_PATH or ARCHIVE_URL, skipping the split/,
+      "should say it skipped the split"
+    );
+  } finally {
+    await api.close();
+  }
+});
+
+await check("the wrangler name matches the Worker name", async () => {
+  // Workers Builds fails the build when this does not match the Worker name in
+  // the dashboard, so the test pins the value.
+  const config = readFileSync(join(dirname(BUILD), "wrangler.jsonc"), "utf8");
+  const name = /"name"\s*:\s*"([^"]+)"/.exec(config);
+  assert.ok(name, "wrangler.jsonc has no name");
+  assert.equal(name[1], "pmtiles-cf-snippet", "the Worker name must match the dashboard");
 });
 
 await check("reports the minified size and the hash", async () => {
