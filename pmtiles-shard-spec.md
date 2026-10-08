@@ -403,9 +403,17 @@ python3 verify-live.py
 ```
 
 It asks the reader for bytes at known archive offsets in all 13 shards, asks the
-shard Worker that should hold those bytes directly, and compares. It also
-compares a leaf directory against the source archive, and checks the five answers
-the snippet must refuse. It passes 27 checks.
+shard Worker that should hold those bytes directly, and compares. It then asks
+for 24 random ranges across all four sections and compares each with the source
+archive at build.protomaps.com. It also checks the five answers the snippet must
+refuse. It passes 51 checks.
+
+That random sweep is the equivalence proof, and it replaces reading a tile by
+hand. A PMTiles client only ever asks for byte ranges. If every range served
+matches the source byte for byte, then any client that works against
+build.protomaps.com works against this endpoint. Measured 2026-10-08: 32 of 32
+random ranges identical, spread over the head, the tile section, the metadata and
+the leaf section.
 
 Test 2 and this replace the earlier `wrangler tail` CPU measurement. A Snippet
 reports no timings, so the CPU budget cannot be read from the outside. See

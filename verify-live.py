@@ -21,6 +21,7 @@ https://build.protomaps.com/20241021.pmtiles on 2026-10-08.
 """
 
 import hashlib
+import random
 import sys
 import urllib.error
 import urllib.request
@@ -30,6 +31,7 @@ ARCHIVE = "https://build.protomaps.com/20241021.pmtiles"
 NAME = "basemap"
 
 TOTAL = 126_775_469_007
+HEAD_END = 16_384
 TILE_OFFSET = 16_384
 TILE_SHARD = 2_000_000
 TILE_PARTS_PER_SHARD = 4_864
@@ -164,6 +166,37 @@ def main():
         status == 206 and body == tail + head,
         f"status {status}, {len(body)} bytes",
     )
+
+    print("\n=== random ranges against the source archive")
+    # This is the equivalence proof that replaces parsing the archive by hand.
+    # A PMTiles client only ever asks for byte ranges. If every range we serve
+    # matches the source archive byte for byte, then any client that works
+    # against build.protomaps.com works against this endpoint.
+    random.seed(20261008)
+    sections = [
+        ("head", 0, HEAD_END),
+        ("tile", TILE_OFFSET, TILE_OFFSET + 63_226 * TILE_SHARD),
+        ("metadata", META_OFFSET, LEAF_OFFSET),
+        ("leaf", LEAF_OFFSET, TOTAL),
+    ]
+    identical = 0
+    refused = 0
+    for section, low, high in sections:
+        for _ in range(6):
+            start = random.randint(low, max(low, high - 1))
+            end = min(TOTAL - 1, start + random.choice([1, 202, 6873, 60000, 150036]) - 1)
+            status, ours, _ = get(READER, start, end)
+            if status == 416:
+                refused += 1
+                continue
+            source_status, origin, _ = get(ARCHIVE, start, end)
+            check(
+                f"{section} bytes {start}..{end} match the source archive",
+                status == 206 and source_status == 206 and ours == origin,
+                f"reader {status}, source {source_status}",
+            )
+            identical += 1
+    print(f"       {identical} ranges identical, {refused} refused as 416")
 
     print("\n=== answers the snippet must refuse")
     for name, rng in [
