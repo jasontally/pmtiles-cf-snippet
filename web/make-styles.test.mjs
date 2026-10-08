@@ -14,6 +14,7 @@
 
 import assert from "node:assert/strict";
 import { gunzipSync } from "node:zlib";
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -333,8 +334,12 @@ await check("the page links the tiles URL the styles use", () => {
     page.includes("Archive metadata"),
     "the page should point at the archive's own metadata rather than a hard coded date"
   );
-  // It must not claim data that is never out of date, and it must say the lag.
-  assert.ok(!/never (out of date|changes)/i.test(page), "the page promises data that never goes stale");
+  // It must not claim the data itself never goes stale. Scoped to a claim about the
+  // tiles, because a comment saying a layer "never changes" is not that claim.
+  assert.ok(
+    !/(tiles|data|archive)[^.<]{0,40}never (changes|out of date|stale)/i.test(page),
+    "the page promises data that never goes stale"
+  );
   assert.ok(/weekly|week/i.test(page), "the page does not give a staleness scale");
 });
 
@@ -399,6 +404,136 @@ await check("the map centres on where the visitor is, and copes when it cannot",
   // allowed to name a city, because that is the point of the example.
   const script = page.slice(page.indexOf('<script type="module">'));
   assert.ok(!/center: \[2\.35, 48\.85\]/.test(script), "the live map still opens on a hard coded city");
+});
+
+await check("every colour control reaches at least one layer", () => {
+  // A colour input that changes nothing is worse than no input: the visitor
+  // changes it, nothing happens, and they conclude the builder is broken. This is
+  // the same guarantee CONTROLS claims in its own comment, checked rather than
+  // asserted in prose.
+  const builder = readBuilder();
+  const template = JSON.stringify(builder.template);
+  for (const key of builder.controlKeys) {
+    const users = builder.template.layers.filter((l) => JSON.stringify(l).includes(`{{${key}}}`));
+    assert.ok(users.length > 0, `the control "${key}" reaches no layer`);
+  }
+  // And any colour the template uses that the page does not expose is a decision on
+  // the list rather than an oversight.
+  //
+  // Seven are land use detail shades. The panel offers 19 colours and these would
+  // be the difference between 19 and 26 inputs for shades a visitor is unlikely to
+  // single out, and the Land use toggle covers the layers they are on.
+  //
+  // Two are catch-alls: the fill colour for a land cover or land use feature whose
+  // kind is not one we name. Nobody wants a colour picker for "something else".
+  // landcover and landuse are also toggle ids, which is why they are worth writing
+  // down: {{landcover}} is a colour and {{show:landcover}} is a toggle, and the
+  // renderer tells them apart by the prefix.
+  const DELIBERATELY_UNEXPOSED = new Set([
+    "commercial", "industrial", "playground", "residential", "school", "scrub", "wetland",
+    "landcover", "landuse",
+  ]);
+  // name and flavor are not colours. The renderer fills them with "custom" and the
+  // flavour label, so they are filled rather than left open.
+  const known = new Set([...builder.controlKeys, "flavor", "name"]);
+  for (const [, key] of template.matchAll(/\{\{([a-zA-Z0-9_-]+)\}\}/g)) {
+    if (key.startsWith("show:")) continue;
+    assert.ok(
+      known.has(key) || DELIBERATELY_UNEXPOSED.has(key),
+      `the template uses {{${key}}} and the page cannot edit it, and it is not on the list of ones it should not`
+    );
+  }
+});
+
+await check("every layer toggle hides the layers it claims to", () => {
+  // This is the guarantee behind crossing a toggle out. A group that maps to no
+  // layer is a button that does nothing, and that is exactly the bug that was
+  // reported: the button worked and the map did not.
+  const builder = readBuilder();
+  for (const toggle of builder.toggles) {
+    const covered = builder.template.layers.filter(
+      (l) => l.visibility === `{{show:${toggle.id}}}`
+    );
+    assert.ok(covered.length > 0, `the toggle "${toggle.id}" covers no layer`);
+    for (const layer of covered) {
+      const hidden = renderTemplate(builder.template, {}, { [toggle.id]: false });
+      const after = hidden.layers.find((l) => l.id === layer.id);
+      assert.equal(after.visibility, "none", `${layer.id} did not go to none`);
+      const shown = renderTemplate(builder.template, {}, {});
+      assert.equal(
+        shown.layers.find((l) => l.id === layer.id).visibility,
+        "visible",
+        `${layer.id} was not visible to begin with`
+      );
+    }
+  }
+});
+
+await check("no layer is left un-toggleable when a group is hidden", () => {
+  // Hiding one group must not accidentally hide another. If a layer carried two
+  // placeholders, or one group covered another's layer, this catches it.
+  const builder = readBuilder();
+  for (const toggle of builder.toggles) {
+    const hidden = renderTemplate(builder.template, {}, { [toggle.id]: false });
+    const none = hidden.layers.filter((l) => l.visibility === "none").map((l) => l.id);
+    const others = builder.toggles.filter((t) => t.id !== toggle.id).map((t) => t.id);
+    for (const id of none) {
+      const owner = builder.toggles.find((t) =>
+        builder.template.layers.some((l) => l.id === id && l.visibility === `{{show:${t.id}}}`)
+      );
+      assert.equal(owner.id, toggle.id, `${id} is shared between ${toggle.id} and ${owner.id}`);
+    }
+    assert.ok(others.every((o) => o !== toggle.id));
+  }
+});
+
+await check("a toggle says which zoom it starts at, and that is true", () => {
+  // Buildings are not drawn below z12. At the zoom the page opens on, crossing
+  // Buildings out correctly changes nothing, and without saying so the control
+  // looks broken.
+  const builder = readBuilder();
+  for (const toggle of builder.toggles) {
+    assert.equal(typeof toggle.minzoom, "number", `the toggle "${toggle.id}" has no zoom`);
+    const zooms = builder.template.layers
+      .filter((l) => l.visibility === `{{show:${toggle.id}}}`)
+      .map((l) => l.minzoom ?? 0);
+    assert.equal(toggle.minzoom, Math.min(...zooms), `the zoom for "${toggle.id}" is wrong`);
+  }
+  const buildings = builder.toggles.find((t) => t.id === "buildings");
+  assert.equal(buildings.minzoom, 12, "buildings start at z12, so the number must say so");
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(page.includes('"z" + toggle.minzoom'), "the page does not show the zoom on the button");
+  assert.ok(page.includes("Zoom in to see them disappear"), "the page does not explain a no visible change");
+});
+
+await check("the vendored libraries are pinned with a matching integrity hash", () => {
+  // A wrong hash does not degrade, it blocks: the script never runs and the map
+  // never appears, with an error most visitors will not read. So the hash in the
+  // page is recomputed from the file rather than trusted.
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  const tags = [...page.matchAll(
+    /(?:href|src)="\/vendor\/([A-Za-z0-9._-]+)"\s*\n\s*integrity="([^"]+)"/g
+  )];
+  assert.equal(tags.length, 3, `expected 3 pinned tags, found ${tags.length}`);
+  assert.ok(!/cdn\.jsdelivr\.net\/npm\/(maplibre-gl|pmtiles)/.test(page),
+    "a script tag still points at the package CDN");
+  for (const [, name, integrity] of tags) {
+    const bytes = readFileSync(join(HERE, "..", "assets", "vendor", name));
+    const digest = "sha384-" + createHash("sha384").update(bytes).digest("base64");
+    assert.equal(integrity, digest, `${name} has the wrong integrity hash`);
+  }
+});
+
+await check("the page documents the fonts and the sprites it serves", () => {
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(page.includes("Fonts and sprites"), "the page has no section on fonts and sprites");
+  // The claim is a hostname swap, so the demo host has to be named and shown as
+  // the before. If that section goes, the claim it makes is gone with it.
+  assert.ok(page.includes("demotiles.maplibre.org"), "the swap-from host is not named");
+  assert.ok(page.includes("replacing that hostname is the whole change"), "the swap is not explained");
+  assert.ok(page.includes("Noto Sans Bold"), "the missing bold stack is not called out");
+  assert.ok(page.includes("256 codepoints at a time"), "the page does not explain the 256 ranges");
+  assert.ok(page.includes("local name"), "the page does not say why non-Latin ranges matter");
 });
 
 console.log(`${passed} passed, ${failed} failed`);

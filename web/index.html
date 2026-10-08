@@ -6,9 +6,23 @@
 <title>Protomaps Basemap tiles — free, no API key</title>
 <meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee.">
 
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js"></script>
+<!--
+  The two libraries, from here, pinned and with a subresource integrity hash.
+
+  They used to come from cdn.jsdelivr.net on a floating @5 and @3, which meant
+  the bytes under a given URL could change with no change to the URL: no integrity
+  hash is possible against that, and somebody copying the example further down
+  could not say what they were loading. Both are BSD-3-Clause and both licences are
+  at /vendor/. tools/bench-assets.mjs measures this host against jsDelivr and prints
+  whether it is actually faster, so the choice can be revisited with a number
+  rather than a hunch.
+-->
+<link rel="stylesheet" href="/vendor/maplibre-gl.css"
+      integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
+<script src="/vendor/maplibre-gl.js"
+        integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
+<script src="/vendor/pmtiles.js"
+        integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
 
 <style>
   :root {
@@ -112,6 +126,9 @@
     background: var(--code-bg); color: var(--ink); border: 1px solid var(--line);
   }
   .builder-toggles button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+  /* The zoom a layer starts at. Small and quiet, but on the button rather than in
+     a tooltip, because the whole problem is that nothing appears to happen. */
+  .builder-toggles .zmin { margin-left: .35rem; font-size: .72rem; opacity: .7; text-decoration: none; display: inline-block; }
   .builder-color-group { margin-top: .9rem; }
   .builder-color-group h4 { margin: 0 0 .45rem; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
   .builder-colors-grid { display: grid; gap: .4rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
@@ -239,16 +256,22 @@
   <p class="sub">The archive speaks HTTP range requests, so every PMTiles client can read it.</p>
 
   <h3>One. Put a map on the page</h3>
-  <p>Copy this file. It is the whole example: two script tags, one style URL, one map.</p>
+  <p>
+    Copy this file. It is the whole example: three script tags, one style URL, one
+    map. The libraries come from here too, so the whole map is one hostname and
+    nothing you depend on belongs to a package CDN. Both are BSD-3-Clause, and if
+    you would rather use jsDelivr or unpkg, swap the three URLs for the CDN ones:
+    they are the same files.
+  </p>
 <pre><code>&lt;!doctype html&gt;
 &lt;html&gt;
 &lt;head&gt;
   &lt;meta charset="utf-8"&gt;
   &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
   &lt;title&gt;Basemap&lt;/title&gt;
-  &lt;link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css"&gt;
-  &lt;script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"&gt;&lt;/script&gt;
-  &lt;script src="https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js"&gt;&lt;/script&gt;
+  &lt;link rel="stylesheet" href="https://tiles.jasontally.com/vendor/maplibre-gl.css"&gt;
+  &lt;script src="https://tiles.jasontally.com/vendor/maplibre-gl.js"&gt;&lt;/script&gt;
+  &lt;script src="https://tiles.jasontally.com/vendor/pmtiles.js"&gt;&lt;/script&gt;
   &lt;style&gt;html, body, #map { margin: 0; height: 100%; }&lt;/style&gt;
 &lt;/head&gt;
 &lt;body&gt;
@@ -302,7 +325,51 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     copy from.
   </p>
 
-  <h3>Three. About Leaflet</h3>
+  <h3>Three. Fonts and sprites</h3>
+  <p>
+    A MapLibre style needs three things: tiles, a <code>glyphs</code> URL for text,
+    and optionally a <code>sprite</code> URL for icons. The tiles are here. So are
+    the other two, at the paths MapLibre asks for, on this hostname.
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>What</th><th>URL</th><th>Licence</th></tr></thead>
+      <tbody id="assets-rows"></tbody>
+    </table>
+  </div>
+  <p>
+    Two font stacks, <code>Noto Sans Regular</code> and <code>Noto Sans Medium</code>,
+    each as the 256 files MapLibre asks for, 256 codepoints at a time. All 256 ranges
+    are published rather than only the Latin ones, because Protomaps labels features
+    with their local name: pan to Tokyo or Cairo and the labels are not English, so
+    they need ranges in the tens of thousands. Publishing only the ranges an
+    English-language map uses would turn those labels into nothing at all, with no
+    error to tell you why.
+  </p>
+  <p>
+    Five sprite sheets, one per upstream flavour, at 1x and 2x. These styles draw no
+    icons, so nothing here is fetched unless you add an icon layer. If you want
+    townspots, highway shields or points of place, point <code>sprite</code> at the
+    one for your flavour.
+  </p>
+  <p>
+    If you have a style that points its glyphs at <code>demotiles.maplibre.org</code>,
+    replacing that hostname is the whole change. The path is deliberately the same.
+  </p>
+<pre><code><span class="s">"glyphs"</span>: <span class="s">"https://tiles.jasontally.com/font/{fontstack}/{range}.pbf"</span>,
+<span class="s">"sprite"</span>: <span class="s">"https://tiles.jasontally.com/sprites/v4/light"</span>
+
+<span class="c">// before, in a style you already have</span>
+<span class="d">- "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",</span>
+<span class="a">+ "glyphs": "https://tiles.jasontally.com/font/{fontstack}/{range}.pbf",</span></code></pre>
+  <p>
+    If a style asks for a font stack that is not one of the two above, nothing will
+    be drawn for it. Protomaps' own styles use <code>Noto Sans Medium</code> for
+    bold text; there is no <code>Noto Sans Bold</code> in this set, which is why a
+    style that asks for one silently loses every label.
+  </p>
+
+  <h3>Four. About Leaflet</h3>
   <p class="note">
     These are <strong>vector</strong> tiles. Leaflet draws raster tiles, and the
     PMTiles library will refuse this archive in Leaflet with
@@ -312,7 +379,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     need a raster-rendered archive, which this is not.
   </p>
 
-  <h3>Four. Read the archive with the PMTiles library</h3>
+  <h3>Five. Read the archive with the PMTiles library</h3>
   <p>No map, just data. Useful for scripts, tests and anything that is not a picture.</p>
 <pre><code>import { PMTiles, FetchSource } from <span class="s">"pmtiles"</span>;
 
@@ -457,6 +524,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   let map = null;
   let flavors = [];
   let current = null;
+  // What the map is showing now, so an edit sends only what changed. Null until
+  // the first apply, which is the one time a whole style is loaded.
+  let appliedStyle = null;
 
   // The archive is a PMTiles file, so read its own metadata rather than
   // hard-coding the layer names on this page.
@@ -489,6 +559,22 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       button.addEventListener("click", () => selectFlavor(flavor));
       $("flavors").appendChild(button);
     }
+
+    // What the fonts and the sprites are, from the same place the styles take it.
+    // Spelling the URLs out here as well would be two answers to the same question
+    // and one of them would go stale.
+    const assets = index.assets || {};
+    const licenceName = { fonts: "SIL OFL 1.1", sprites: "MIT" };
+    $("assets-rows").innerHTML = [
+      ['glyphs', assets.glyphs, assets.fonts ? assets.fonts.join(", ") : "", "fonts"],
+      ['sprite', assets.sprite, assets.sprites ? assets.sprites.join(", ") : "", "sprites"],
+    ].map(([key, url, what, kind]) =>
+      "<tr><td><code>" + key + "</code></td>" +
+      '<td class="mono"><a href="' + url.replace(/\{[^}]+\}/g, "x") + '" target="_blank" rel="noopener">' +
+      url + "</a><br><span style=\"color:var(--muted)\">" + what + "</span></td>" +
+      '<td><a href="' + assets.licences[kind] + '" target="_blank" rel="noopener">' +
+      licenceName[kind] + "</a></td></tr>"
+    ).join("");
 
     // style table
     $("style-rows").innerHTML = flavors.map((f) =>
@@ -578,6 +664,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       apply();
     } else {
       map.setStyle(flavor.url);
+        // Forget what we thought was on screen, or the first builder edit
+        // would diff against a style that is no longer there.
+        appliedStyle = null;
       setHint("loading tiles…");
     }
   }
@@ -631,10 +720,77 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     }
   }
 
-  /** Render the current edits and hand the map the result. */
+  /** Render the current edits. This is the style the copy button hands over. */
   function currentStyle() {
     const values = { ...builder.values, flavor: builder.baseId };
     return renderTemplate(builder.data.template, values, builder.show);
+  }
+
+  /**
+   * Push the edits into the live map, without handing MapLibre a new style.
+   *
+   * Handing it a new style is the obvious thing to do and it is wrong. Two
+   * reasons, both found by looking at the screen rather than the code:
+   *
+   * - MapLibre does not take a layer's `visibility` from a style object. It stays
+   *   whatever it was, so crossing out Buildings or Roads changed the JSON you
+   *   copied and left the map alone. Only setLayoutProperty moves it, and
+   *   diff:false does not help.
+   * - setStyle rebuilds the style from scratch, which is not what "instant" means.
+   *   The shape never changes here, only values, so only the values need pushing.
+   *
+   * So this diffs against what was last applied and sends just the differences.
+   * A colour drag sends one property, not thirty layers.
+   */
+  function pushStyle(style) {
+    const previous = appliedStyle;
+    const sameShape =
+      previous &&
+      previous.layers.length === style.layers.length &&
+      previous.layers.every((layer, i) => layer.id === style.layers[i].id);
+
+    // If the layer set ever differs, only a real setStyle can express that. With
+    // one template it cannot, and this is here so that it is handled rather than
+    // silently wrong if it ever is.
+    if (!sameShape) {
+      map.setStyle(style);
+      appliedStyle = style;
+      // setStyle drops visibility, so it is put back once the new style exists.
+      map.once("styledata", () => pushVisibility(style));
+      return;
+    }
+
+    for (const layer of style.layers) {
+      const before = previous.layers.find((l) => l.id === layer.id);
+      for (const [property, value] of Object.entries(layer.paint || {})) {
+        if (!equal(before.paint?.[property], value)) {
+          map.setPaintProperty(layer.id, property, value);
+        }
+      }
+      for (const [property, value] of Object.entries(layer.layout || {})) {
+        if (!equal(before.layout?.[property], value)) {
+          map.setLayoutProperty(layer.id, property, value);
+        }
+      }
+      // Absent means the style default, which is visible.
+      const visibility = layer.visibility || "visible";
+      if ((before.visibility || "visible") !== visibility) {
+        map.setLayoutProperty(layer.id, "visibility", visibility);
+      }
+    }
+    appliedStyle = style;
+  }
+
+  /** Set visibility on every layer, for the path where MapLibre rebuilt the style. */
+  function pushVisibility(style) {
+    for (const layer of style.layers) {
+      map.setLayoutProperty(layer.id, "visibility", layer.visibility || "visible");
+    }
+  }
+
+  /** Deep equality for the small JSON values in a style. */
+  function equal(a, b) {
+    return JSON.stringify(a) === JSON.stringify(b);
   }
 
   function apply() {
@@ -652,7 +808,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
           escapeHtml(Object.keys(builder.show).join(", ")) + " hidden."}</strong> ` +
         "This is a complete MapLibre style. Save it as a .json file and point " +
         "your map at it.";
-    map.setStyle(style);
+    pushStyle(style);
   }
 
   function escapeHtml(text) {
@@ -681,7 +837,17 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       const button = document.createElement("button");
       button.type = "button";
       button.dataset.id = toggle.id;
-      button.textContent = toggle.label;
+      // The zoom a layer starts at, on the button. Buildings are not drawn
+      // below z12, so without this the toggle looks broken at any normal zoom.
+      if (toggle.minzoom > 0) {
+        button.append(toggle.label, Object.assign(document.createElement("span"), {
+          className: "zmin",
+          textContent: "z" + toggle.minzoom + "+",
+        }));
+        button.title = toggle.label + " are drawn from zoom " + toggle.minzoom + " upwards";
+      } else {
+        button.textContent = toggle.label;
+      }
       button.setAttribute("aria-pressed", "true");
       button.addEventListener("click", () => {
         const on = button.getAttribute("aria-pressed") !== "true";
@@ -689,6 +855,15 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
         if (on) delete builder.show[toggle.id];
         else builder.show[toggle.id] = false;
         apply();
+        // Turning a layer off below the zoom where it is drawn changes the style
+        // and nothing on screen. Say why, because otherwise the control looks
+        // broken and the visitor has no way to tell it apart from a real bug.
+        if (!on && toggle.minzoom > 0 && map.getZoom() < toggle.minzoom) {
+          say(toggle.label + " start at zoom " + toggle.minzoom +
+            ". Zoom in to see them disappear.");
+        } else {
+          say("");
+        }
       });
       $("builder-toggles").appendChild(button);
     }

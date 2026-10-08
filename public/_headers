@@ -2,3 +2,17 @@
 	Cache-Control: public, max-age=31536000, immutable
 	Access-Control-Allow-Origin: *
 	Access-Control-Expose-Headers: Content-Length
+/font/*
+	Cache-Control: public, max-age=31536000, immutable
+	Access-Control-Allow-Origin: *
+/font/OFL.txt
+	Cache-Control: public, max-age=3600
+	Access-Control-Allow-Origin: *
+/sprites/*
+	Cache-Control: public, max-age=86400
+	Access-Control-Allow-Origin: *
+/vendor/*
+	Cache-Control: public, max-age=31536000, immutable
+	Access-Control-Allow-Origin: *
+/styles/*
+	Access-Control-Allow-Origin: *

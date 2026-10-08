@@ -33,12 +33,32 @@ const SOURCE_NAME = "protomaps";
 const ATTRIBUTION =
   '<a href="https://www.openstreetmap.org/copyright">© OpenStreetMap contributors</a>';
 
-// Labels need glyphs. This is the public glyph server from the MapLibre demo
-// tiles, which serves the Noto Sans stacks used below. Nothing here is on our
-// origin, so a glyph outage does not take the map down.
-const GLYPHS = "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf";
-const FONT = ["Noto Sans Regular"];
-const FONT_BOLD = ["Noto Sans Bold"];
+// Labels need glyphs, and a style has to name a host to get them from.
+//
+// It used to name demotiles.maplibre.org, which is MapLibre's demo tile server. It
+// was the slowest thing on the page, it is a demo host used as a production
+// dependency, and an outage there takes down every map that uses these tiles.
+//
+// So the glyphs are served from here, like everything else, at the same path the
+// demo host uses. That is deliberate: a developer who has demotiles.maplibre.org
+// in a style can replace the hostname and nothing else, and have it work. The
+// path is /font/ and not /fonts/ for exactly that reason.
+//
+// Vendored by tools/fetch-assets.mjs. Noto Sans is SIL Open Font License 1.1, and
+// the licence travels with the files at /font/OFL.txt.
+export const GLYPHS = "https://tiles.jasontally.com/font/{fontstack}/{range}.pbf";
+
+// Sprites, for anyone who wants icons: townspots, highway shields, points of
+// place. These styles draw none, so MapLibre fetches no sprite and this costs
+// nothing at request time. Derived from MIT licensed tangrams/icons, licence at
+// /sprites/LICENSE.md.
+export const SPRITES = "https://tiles.jasontally.com/sprites/v4";
+
+// Noto Sans Medium is what upstream Protomaps uses for bold, and it is the only
+// bold-ish stack in the OFL set we vendor. "Noto Sans Bold" does not exist there,
+// which is the other half of why the glyphs had to come from the demo host.
+export const FONT = ["Noto Sans Regular"];
+export const FONT_BOLD = ["Noto Sans Medium"];
 
 /**
  * The nine source layers in this archive, with the zoom range each one carries.
@@ -117,6 +137,21 @@ export const CONTROLS = [
   { group: "Boundaries and labels", keys: ["boundary", "label", "halo", "poiLabel"] },
   { group: "Buildings", keys: ["building", "buildingOutline"] },
 ];
+
+/**
+ * The lowest zoom at which any layer in a toggle group is drawn.
+ *
+ * A group with nothing below it is on screen everywhere, so 0. The page uses this
+ * to say why crossing a layer out changed nothing: Buildings are not drawn below
+ * z12, so at z5 the toggle is correct and the map is correct and the screen looks
+ * like the control is broken. Saying so is the whole fix.
+ */
+export function groupMinzoom(template, groupId) {
+  const zooms = template.layers
+    .filter((layer) => layer.visibility === `{{show:${groupId}}}`)
+    .map((layer) => layer.minzoom ?? 0);
+  return zooms.length ? Math.min(...zooms) : 0;
+}
 
 /** Every colour key the page may edit, from CONTROLS. */
 export const CONTROL_KEYS = [...new Set(CONTROLS.flatMap((group) => group.keys))];
@@ -403,6 +438,10 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     bearing: 0,
     pitch: 0,
     glyphs: GLYPHS,
+    // No sprite here on purpose. A style that names one has MapLibre fetch it, and
+    // these layers draw no icons, so it would be a request for nothing. It is
+    // published anyway for anyone adding icon layers, and the documentation says
+    // where.
     sources: {
       [SOURCE_NAME]: {
         type: "vector",
@@ -627,6 +666,19 @@ function main() {
     // Bright is the one to lead with: it reads clearly on a screen and is the
     // least opinionated of the three.
     defaultFlavor: "bright",
+    // Published on the same host, at the paths a style expects. On the page so a
+    // developer can see them without reading this file.
+    assets: {
+      glyphs: GLYPHS,
+      sprite: SPRITES,
+      fonts: ["Noto Sans Regular", "Noto Sans Medium"],
+      sprites: ["light", "dark", "grayscale", "black", "white"],
+      // Both licences require travelling with the files they cover.
+      licences: {
+        fonts: "/font/OFL.txt",
+        sprites: "/sprites/LICENSE.md",
+      },
+    },
     flavors: Object.entries(FLAVORS).map(([id, p]) => ({
       id,
       label: p.name,
@@ -647,7 +699,7 @@ function main() {
     console.log(`  ${flavor}.json  ${Buffer.byteLength(text).toLocaleString()} bytes, ${style.layers.length} layers`);
   }
   writeFileSync(join(OUT, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
-  console.log(`  index.json  ${Object.keys(FLAVORS).length} flavors`);
+  console.log(`  index.json  ${Object.keys(FLAVORS).length} flavors, assets on ${new URL(GLYPHS).host}`);
 
   // The builder payload. One template, because the styles are structurally
   // identical and only the colours differ, plus every palette so the page can
@@ -664,7 +716,7 @@ function main() {
     palettes: FLAVORS,
     controls: CONTROLS,
     controlKeys: CONTROL_KEYS,
-    toggles: TOGGLE_GROUPS.map(({ id, label }) => ({ id, label })),
+    toggles: TOGGLE_GROUPS.map(({ id, label }) => ({ id, label, minzoom: groupMinzoom(template, id) })),
   };
   const builderText = `${JSON.stringify(builder, null, 2)}\n`;
   writeFileSync(join(OUT, "builder.json"), builderText);

@@ -48,7 +48,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
+  copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -74,11 +74,40 @@ const MODULE_FILE = "snippet.js";
 
 // Same content shard-pmtiles.py writes. Kept here so a build that skips the
 // split still leaves the assets directory in a deployable state.
+/**
+ * Caching and CORS for the assets a browser fetches from somebody else's page.
+ *
+ * The Access-Control-Allow-Origin line is what makes this usable at all. A style
+ * hosted anywhere, or a page on any domain, asks this host for a font range, and
+ * without it the browser refuses and the labels are simply missing. Same for the
+ * styles themselves, which is why the page on this host already needed it.
+ *
+ * immutable on the fonts and the libraries: the file name or the pinned version
+ * changes when the bytes do, so a long cache is safe and a revalidation round trip
+ * is pure waste.
+ *
+ * The sprites and the licences are not immutable, because they are named without a
+ * version in them.
+ */
 const HEADERS_FILE =
   "/s/*\n" +
   "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
-  "\tAccess-Control-Expose-Headers: Content-Length\n";
+  "\tAccess-Control-Expose-Headers: Content-Length\n" +
+  "/font/*\n" +
+  "\tCache-Control: public, max-age=31536000, immutable\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
+  "/font/OFL.txt\n" +
+  "\tCache-Control: public, max-age=3600\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
+  "/sprites/*\n" +
+  "\tCache-Control: public, max-age=86400\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
+  "/vendor/*\n" +
+  "\tCache-Control: public, max-age=31536000, immutable\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
+  "/styles/*\n" +
+  "\tAccess-Control-Allow-Origin: *\n";
 
 const env = (key, fallback) => {
   const value = process.env[key];
@@ -667,12 +696,17 @@ async function prepare() {
   }
 
   // wrangler refuses to deploy when the assets directory is missing, and the
-  // directory is missing on any build that runs before the first split. The
-  // split writes _headers; this covers a build that skipped it.
-  if (!existsSync(join(PUBLIC_DIR, "_headers"))) {
-    console.log("writing public/_headers");
+  // directory is missing on any build that runs before the first split.
+  // Rewritten when the content differs, not only when the file is missing. A
+  // split writes the /s/* block on its own, and a build that kept whatever was
+  // there would silently ship the new paths with no CORS on them, which shows up
+  // as missing labels on somebody else's map and nowhere else.
+  const headersPath = join(PUBLIC_DIR, "_headers");
+  const headersNow = existsSync(headersPath) ? readFileSync(headersPath, "utf8") : null;
+  if (headersNow !== HEADERS_FILE) {
+    console.log(`writing public/_headers${headersNow === null ? "" : " (changed)"}`);
     mkdirSync(PUBLIC_DIR, { recursive: true });
-    writeFileSync(join(PUBLIC_DIR, "_headers"), HEADERS_FILE);
+    writeFileSync(headersPath, HEADERS_FILE);
   }
 
   step("minify the snippet");
@@ -707,6 +741,8 @@ function writeDocs() {
   copyFileSync(page, join(PUBLIC_DIR, "index.html"));
   console.log(`public/index.html (${statSync(page).size} bytes)`);
 
+  copyVendorAssets();
+
   // The generator is a separate process so a style error fails the build with a
   // non-zero exit rather than being swallowed.
   const generator = join(webDir, "make-styles.mjs");
@@ -717,6 +753,84 @@ function writeDocs() {
   for (const line of (result.stdout || "").trim().split("\n")) {
     console.log(`  ${line.trim()}`);
   }
+}
+
+/**
+ * Copy the vendored fonts and sprites into public/.
+ *
+ * A style names a host for glyphs, so a map using these tiles depends on whatever
+ * host the style points at. Serving them from here means the whole map comes from
+ * one hostname, and the styles can tell a developer to swap a hostname and nothing
+ * else.
+ *
+ * The paths mirror what MapLibre asks for:
+ *   /font/{fontstack}/{range}.pbf
+ *   /sprites/v4/{flavour}
+ * so `font` is singular, to match demotiles.maplibre.org. That is deliberate: a
+ * developer who has the demo host in a style can replace the hostname and have it
+ * work, rather than having to know our layout as well.
+ *
+ * The manifest is not copied. It is for this build to check itself, not for
+ * anybody to fetch.
+ */
+function copyVendorAssets() {
+  const source = join(ROOT, "assets");
+  if (!existsSync(source)) {
+    console.log("no assets/, run: node tools/fetch-assets.mjs");
+    return;
+  }
+
+  // MapLibre asks for /font/... . The tree is fonts/ in the repo because that is
+  // the name the upstream layout and the OFL use.
+  const trees = [
+    [join(source, "fonts"), join(PUBLIC_DIR, "font")],
+    [join(source, "sprites"), join(PUBLIC_DIR, "sprites")],
+    [join(source, "vendor"), join(PUBLIC_DIR, "vendor")],
+  ];
+  // The licences travel with the files they cover, at the path the files are
+  // served from rather than the path they are kept at. Both allow redistribution
+  // and both ask to be included.
+  const licences = [
+    [join(source, "fonts", "OFL.txt"), join(PUBLIC_DIR, "font", "OFL.txt")],
+    [join(source, "sprites", "LICENSE.md"), join(PUBLIC_DIR, "sprites", "LICENSE.md")],
+  ];
+
+  let files = 0;
+  let bytes = 0;
+  for (const [from, to] of trees) {
+    if (!existsSync(from)) continue;
+    cpSync(from, to, { recursive: true });
+    const walked = measure(to);
+    files += walked.files;
+    bytes += walked.bytes;
+  }
+  for (const [from, to] of licences) {
+    if (!existsSync(from)) continue;
+    mkdirSync(dirname(to), { recursive: true });
+    copyFileSync(from, to);
+    files++;
+    bytes += statSync(from).size;
+  }
+
+  console.log(`public/font, public/sprites (${files} files, ${(bytes / 1e6).toFixed(2)} MB)`);
+}
+
+/** How many files a copied tree holds and how big it is, in one walk. */
+function measure(dir) {
+  let files = 0;
+  let bytes = 0;
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      const inner = measure(path);
+      files += inner.files;
+      bytes += inner.bytes;
+    } else {
+      files++;
+      bytes += statSync(path).size;
+    }
+  }
+  return { files, bytes };
 }
 
 /**

@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Serve a 118 GiB PMTiles archive from Cloudflare Static Assets with a Snippet",
   "scripts": {
-    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js && node web/make-styles.test.mjs && node tools/sync-reader.test.mjs && node shard-repo/refresh.test.mjs && node shard-repo/shard-build.test.mjs",
+    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js && node web/make-styles.test.mjs && node tools/sync-reader.test.mjs && node tools/fetch-assets.test.mjs && node shard-repo/refresh.test.mjs && node shard-repo/shard-build.test.mjs",
     "test:rules": "node --test snippet-rules.test.mjs",
     "test:split": "python3 shard-pmtiles.py --selftest",
     "test:snippet": "node snippet-test.js",
@@ -26,6 +26,9 @@
     "sync": "node tools/sync-reader.mjs",
     "sync:plan": "node tools/sync-reader.mjs --plan",
     "test:shard-refresh": "node shard-repo/refresh.test.mjs",
-    "test:shard-build": "node shard-repo/shard-build.test.mjs"
+    "test:shard-build": "node shard-repo/shard-build.test.mjs",
+    "assets": "node tools/fetch-assets.mjs",
+    "assets:check": "node tools/fetch-assets.mjs --check",
+    "bench:assets": "node tools/bench-assets.mjs"
   }
 }
