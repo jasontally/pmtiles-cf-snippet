@@ -121,21 +121,38 @@ await check("both licences are present and say what they cover", () => {
   assert.ok(/MIT/i.test(mit), "the sprite licence is not MIT");
 });
 
-await check("the libraries are not vendored, because they measured slower here", () => {
-  // They were. They were served from this host, measured against jsDelivr three
-  // times, and jsDelivr won by between 1.15 and 1.67 times, so they went back. The
-  // files are gone rather than left in the repo unused, because an asset tree that
-  // is never served and never updated is a thing people trust by mistake.
-  assert.ok(!existsSync(join(ROOT, "assets", "vendor")), "assets/vendor still exists");
-  assert.ok(!existsSync(join(ROOT, "public", "vendor")), "public/vendor still exists");
-  const page = readFileSync(join(ROOT, "web", "index.html"), "utf8");
-  assert.ok(!page.includes("/vendor/"), "the page still points a script at /vendor/");
-  const headers = readFileSync(join(ROOT, "public", "_headers"), "utf8");
-  assert.ok(!headers.includes("/vendor/"), "_headers still has a rule for /vendor/");
-  // And the manifest must not keep claiming to cover them.
-  for (const relative of manifest.keys()) {
-    assert.ok(!relative.startsWith("vendor/"), `${relative} is in the manifest but nothing vendors it`);
+await check("the libraries are vendored even though the CDN is faster", () => {
+  // Measured, and jsDelivr won, so the page loads from jsDelivr. The copies stay
+  // because a developer who wants a map from one hostname should be able to have
+  // that, and because saying "ours is slower" is only believable if ours exists.
+  for (const name of ["maplibre-gl.js", "maplibre-gl.css", "pmtiles.js"]) {
+    assert.ok(existsSync(join(ROOT, "assets", "vendor", name)), `assets/vendor/${name} is missing`);
+    assert.ok(existsSync(join(ROOT, "public", "vendor", name)), `public/vendor/${name} is missing`);
+    assert.ok(manifest.has(`vendor/${name}`), `vendor/${name} has no digest`);
   }
+  // And they are documented, with their licences.
+  for (const licence of ["maplibre-gl-LICENSE.txt", "pmtiles-LICENSE.txt"]) {
+    assert.ok(existsSync(join(ROOT, "public", "vendor", licence)), `${licence} is not published`);
+  }
+  // The page must actually render them, from the build's own list rather than a
+  // second hand written copy of it. A URL typed into the page is a URL that goes
+  // stale without anything failing.
+  const index = JSON.parse(readFileSync(join(ROOT, "public", "styles", "index.json"), "utf8"));
+  const listed = index.assets.libraries || [];
+  assert.equal(listed.length, 3, `index.json lists ${listed.length} libraries, expected 3`);
+  for (const lib of listed) {
+    assert.ok(existsSync(join(ROOT, "public", lib.path.replace(/^\//, ""))), `${lib.path} is listed but not published`);
+  }
+  // The page renders them from that list, which is the point: a URL typed into the
+  // HTML would be a second copy of the truth and would go stale quietly.
+  const page = readFileSync(join(ROOT, "web", "index.html"), "utf8");
+  assert.ok(page.includes("assets.libraries"), "the page does not render the library list from the build");
+  assert.ok(
+    page.includes("also on jsDelivr"),
+    "the page does not say the libraries are on the CDN too"
+  );
+  const headers = readFileSync(join(ROOT, "public", "_headers"), "utf8");
+  assert.ok(/^\/vendor\/\*/m.test(headers), "no header rule for /vendor/, so a cross-origin load would fail");
 });
 
 await check("the build publishes the fonts where the styles look for them", () => {

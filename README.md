@@ -47,6 +47,7 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `tools/sync-reader.mjs` | Brings the reader's byte offsets in line with the live archive. |
 | `tools/fetch-assets.mjs` | Vendors the fonts and the sprites, and checks them by digest. |
 | `tools/bench-assets.mjs` | Measures this host against jsDelivr and the upstream assets site. |
+| `asset-hosting.md` | Where the fonts, sprites and libraries are served from, and why. |
 | `shard-repo/` | The template pushed to each of the 13 shard repos. |
 | `make-repos.mjs` | Creates the shard repos and pushes the template. |
 | `wire-shards.mjs` | Binds each shard repo to its Worker through the API. |
@@ -208,3 +209,6 @@ the split and deploys the snippet only.
 * No GitHub repo holds a Cloudflare token. Each shard repo has a workflow that
   commits the archive it should hold, and that commit starts the build. Cloudflare
   injects its own token into the build. See [refresh.md](refresh.md).
+* The fonts, the sprite sheets and copies of the two libraries are published here,
+  so a map can come from one hostname. The page loads the libraries from jsDelivr
+  because that measured faster. See [asset-hosting.md](asset-hosting.md).

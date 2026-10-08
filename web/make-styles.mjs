@@ -668,15 +668,28 @@ function main() {
     defaultFlavor: "bright",
     // Published on the same host, at the paths a style expects. On the page so a
     // developer can see them without reading this file.
+    // Everything a map needs beyond the tiles, and where each one is. Rendered into
+    // the page rather than written out there, so the page cannot disagree with the
+    // build about a URL.
     assets: {
       glyphs: GLYPHS,
       sprite: SPRITES,
       fonts: ["Noto Sans Regular", "Noto Sans Medium"],
       sprites: ["light", "dark", "grayscale", "black", "white"],
-      // Both licences require travelling with the files they cover.
+      // The libraries, published here as well as on jsDelivr. The page itself loads
+      // them from jsDelivr because that measured faster; these are here so a
+      // developer can serve a whole map from one hostname.
+      libraries: [
+        { name: "MapLibre GL JS", version: "5.24.0", path: "/vendor/maplibre-gl.js", licence: "BSD-3-Clause" },
+        { name: "MapLibre GL CSS", version: "5.24.0", path: "/vendor/maplibre-gl.css", licence: "BSD-3-Clause" },
+        { name: "PMTiles JS", version: "3.2.1", path: "/vendor/pmtiles.js", licence: "BSD-3-Clause" },
+      ],
+      // Each licence travels with the files it covers. All four allow
+      // redistribution.
       licences: {
-        fonts: "/font/OFL.txt",
-        sprites: "/sprites/LICENSE.md",
+        fonts: { label: "SIL OFL 1.1", path: "/font/OFL.txt" },
+        sprites: { label: "MIT", path: "/sprites/LICENSE.md" },
+        libraries: { label: "BSD-3-Clause", path: "/vendor/maplibre-gl-LICENSE.txt" },
       },
     },
     flavors: Object.entries(FLAVORS).map(([id, p]) => ({

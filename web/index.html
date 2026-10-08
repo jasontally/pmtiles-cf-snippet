@@ -330,18 +330,25 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     copy from.
   </p>
 
-  <h3>Three. Fonts and sprites</h3>
+  <h3>Three. Fonts, sprites and the libraries</h3>
   <p>
-    A MapLibre style needs three things: tiles, a <code>glyphs</code> URL for text,
-    and optionally a <code>sprite</code> URL for icons. The tiles are here. So are
-    the other two, at the paths MapLibre asks for, on this hostname.
+    A map is the tiles, a <code>glyphs</code> URL for text, optionally a
+    <code>sprite</code> URL for icons, and two libraries to draw any of it. All of
+    that is here, at the paths each one expects, so a map can come from a single
+    hostname if you want it to.
   </p>
   <div class="scroll">
     <table>
-      <thead><tr><th>What</th><th>URL</th><th>Licence</th></tr></thead>
+      <thead><tr><th>What</th><th>URL here</th><th>Licence</th></tr></thead>
       <tbody id="assets-rows"></tbody>
     </table>
   </div>
+  <p>
+    The two libraries are here and are also on jsDelivr. This page loads them from
+    jsDelivr, because that measured faster; the copies here are so that you can use
+    one hostname if you prefer. Both are the same files, pinned to the same version,
+    so swapping is a URL change and nothing else.
+  </p>
   <p>
     Two font stacks, <code>Noto Sans Regular</code> and <code>Noto Sans Medium</code>,
     each as the 256 files MapLibre asks for, 256 codepoints at a time. All 256 ranges
@@ -374,15 +381,15 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     style that asks for one silently loses every label.
   </p>
   <p class="note">
-    <strong>Why the fonts are here and the libraries are not.</strong> All of it was
-    measured rather than assumed, three runs of nine requests each, against jsDelivr
-    and against the upstream assets site, from one machine on one network. jsDelivr
-    was 1.15 to 1.67 times faster on MapLibre and PMTiles, so those two stay on the
-    CDN. For the fonts the two were the same inside the noise, and this host caches
-    them for a year against upstream's ten minutes, so they are served from here
-    along with the sprites. Those numbers are one reader's view; the fonts are also
-    the case where depending on somebody else's uptime matters most, since a glyph
-    server that is down is a map with no labels.
+    <strong>Which host is faster, and how that was decided.</strong> Measured, not
+    assumed: 15 requests to each host, from one machine on one network, and a
+    difference is only acted on when the middle halves of the two sets of samples do
+    not overlap and the gap is over 15%. On that test jsDelivr was clearly faster on
+    MapLibre GL and PMTiles, and the two were indistinguishable on the fonts, so the
+    libraries load from the CDN and the fonts and sprites are served from here. Those
+    numbers are one reader's view, and re-running the measurement is one command. The
+    fonts are also the case where it matters most that somebody else is not holding
+    the uptime: a glyph server that is down is a map with no labels.
   </p>
 
   <h3>Four. About Leaflet</h3>
@@ -580,17 +587,27 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     // Spelling the URLs out here as well would be two answers to the same question
     // and one of them would go stale.
     const assets = index.assets || {};
-    const licenceName = { fonts: "SIL OFL 1.1", sprites: "MIT" };
-    $("assets-rows").innerHTML = [
-      ['glyphs', assets.glyphs, assets.fonts ? assets.fonts.join(", ") : "", "fonts"],
-      ['sprite', assets.sprite, assets.sprites ? assets.sprites.join(", ") : "", "sprites"],
-    ].map(([key, url, what, kind]) =>
-      "<tr><td><code>" + key + "</code></td>" +
+    const licenceFor = (kind) => assets.licences[kind] || {};
+    const cell = (label, url, note) =>
       '<td class="mono"><a href="' + url.replace(/\{[^}]+\}/g, "x") + '" target="_blank" rel="noopener">' +
-      url + "</a><br><span style=\"color:var(--muted)\">" + what + "</span></td>" +
-      '<td><a href="' + assets.licences[kind] + '" target="_blank" rel="noopener">' +
-      licenceName[kind] + "</a></td></tr>"
-    ).join("");
+      url + "</a>" + (note ? '<br><span style="color:var(--muted)">' + note + "</span>" : "") + "</td>";
+    const rowsFor = [
+      "<tr><td><code>glyphs</code></td>" +
+        cell("", assets.glyphs, (assets.fonts || []).join(", ")) +
+        '<td><a href="' + licenceFor("fonts").path + '" target="_blank" rel="noopener">' +
+        licenceFor("fonts").label + "</a></td></tr>",
+      "<tr><td><code>sprite</code></td>" +
+        cell("", assets.sprite, (assets.sprites || []).join(", ")) +
+        '<td><a href="' + licenceFor("sprites").path + '" target="_blank" rel="noopener">' +
+        licenceFor("sprites").label + "</a></td></tr>",
+      ...(assets.libraries || []).map((lib) =>
+        "<tr><td>" + lib.name + "</td>" +
+        cell("", location.origin + lib.path, "v" + lib.version + ", also on jsDelivr") +
+        '<td><a href="' + licenceFor("libraries").path + '" target="_blank" rel="noopener">' +
+        licenceFor("libraries").label + "</a></td></tr>"
+      ),
+    ];
+    $("assets-rows").innerHTML = rowsFor.join("");
 
     // style table
     $("style-rows").innerHTML = flavors.map((f) =>

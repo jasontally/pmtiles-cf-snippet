@@ -69,6 +69,26 @@ const SPRITE_EXTS = ["json", "png"];
  * Licences, copied next to the assets they cover. Redistribution is allowed by
  * both, and both require the licence to travel with the files.
  */
+/**
+ * The two libraries, vendored so a developer can serve a whole map from one
+ * hostname if they want to.
+ *
+ * Both BSD-3-Clause, which permits redistribution. Pinned, not floating on @5 and
+ * @3: a floating tag means the bytes under a URL change without the URL changing,
+ * so nothing can be served with a subresource integrity hash and nobody can tell
+ * what they loaded.
+ *
+ * The documentation page does not load these from here. Measured against jsDelivr,
+ * jsDelivr is between 1.15 and 1.67 times faster on a warm request, and the page
+ * uses the faster one. See asset-hosting.md for the numbers and the method. These
+ * copies exist so that one is there to use, not because the page does.
+ */
+const VENDOR = [
+  { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js", to: "vendor/maplibre-gl.js" },
+  { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css", to: "vendor/maplibre-gl.css" },
+  { url: "https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js", to: "vendor/pmtiles.js" },
+];
+
 const LICENCES = [
   {
     // raw.githubusercontent, not the pages site: the licence is in the repo but is
@@ -81,6 +101,16 @@ const LICENCES = [
     from: "https://raw.githubusercontent.com/tangrams/icons/master/LICENSE.md",
     to: "assets/sprites/LICENSE.md",
     note: "MIT, covers the icons the sprites are built from",
+  },
+  {
+    from: "https://raw.githubusercontent.com/maplibre/maplibre-gl-js/main/LICENSE.txt",
+    to: "assets/vendor/maplibre-gl-LICENSE.txt",
+    note: "BSD-3-Clause, covers maplibre-gl.js and maplibre-gl.css",
+  },
+  {
+    from: "https://raw.githubusercontent.com/protomaps/PMTiles/main/LICENSE",
+    to: "assets/vendor/pmtiles-LICENSE.txt",
+    note: "BSD-3-Clause, covers ptiles.js",
   },
 ];
 
@@ -101,6 +131,7 @@ function wanted() {
       files.push(`${dir}/${start}-${start + 255}.pbf`);
     }
   }
+  for (const file of VENDOR) files.push(file.to);
   for (const flavor of SPRITES) {
     for (const suffix of SPRITE_SUFFIXES) {
       for (const ext of SPRITE_EXTS) {
@@ -198,8 +229,10 @@ async function main() {
   }
 
   let fetched = 0;
+  // The libraries come from the npm CDN, the fonts and sprites from the assets site.
+  const vendorUrl = new Map(VENDOR.map((f) => [f.to, f.url]));
   for (const relative of missing) {
-    const url = `${SOURCE}/${relative}`;
+    const url = vendorUrl.get(relative) || `${SOURCE}/${relative}`;
     const bytes = await fetchText(url);
     const path = join(ASSETS, relative);
     mkdirSync(dirname(path), { recursive: true });

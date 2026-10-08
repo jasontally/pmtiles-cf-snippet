@@ -117,17 +117,43 @@ async function measure(url) {
   // The first sample carries the TLS handshake and any cache miss. Median of the
   // rest is the warm number; the first is reported beside it.
   const warm = samples.slice(1).sort((a, b) => a - b);
-  const median = warm.length ? warm[Math.floor(warm.length / 2)] : samples[0];
-  const best = Math.min(...samples);
+  const at = (q) => warm[Math.min(warm.length - 1, Math.floor(warm.length * q))];
   return {
     error: null,
-    median,
+    median: at(0.5),
+    best: Math.min(...samples),
+    // The middle half of the samples. Reported because a median on its own cannot
+    // tell a real difference from one lucky sample, and "the CDN is faster" is a
+    // claim somebody will act on.
+    p25: at(0.25),
+    p75: at(0.75),
     cold: samples[0],
-    best,
     bytes,
     cacheControl: headers.get("cache-control"),
-    age: headers.get("age"),
     encoding: headers.get("content-encoding"),
+  };
+}
+
+/**
+ * Whether one host is faster than the other, and how sure of it.
+ *
+ * Two rules, both deliberate. The gap has to clear 15%, because below that it sits
+ * inside the variation of one network at one moment and calling it a result would be
+ * dressing noise up as a finding. And the middle halves of the two sets of samples
+ * must not overlap, because if they do then one unlucky request moved the median and
+ * no amount of averaging has fixed it.
+ */
+function verdict(ours, cdn) {
+  const ratio = ours.median / cdn.median;
+  if (Math.abs(ratio - 1) < 0.15) return { text: "too close to call", ratio, sure: false };
+  const faster = ratio > 1 ? "ours" : "the CDN";
+  const speedup = Math.max(ratio, 1 / ratio);
+  // Ours slower means: the CDN's fast half is still faster than our slow half.
+  const separated = ratio > 1 ? ours.p25 > cdn.p75 : cdn.p25 > ours.p75;
+  return {
+    text: `${faster} ${speedup.toFixed(2)}x faster${separated ? "" : ", samples overlap"}`,
+    ratio,
+    sure: separated,
   };
 }
 
@@ -147,20 +173,22 @@ async function main() {
 
   console.log(`\n  ${RUNS} requests per URL from this machine. Warm = median of runs 2..${RUNS}.`);
   console.log(`  Cold is run 1, which pays TLS. Not a general result: a reader elsewhere\n  sees a different edge for each host.\n`);
-  console.log(`  ${pad("asset", 32)}${pad("ours", 20)}${pad("cdn", 20)}verdict`);
+  console.log(`  ${pad("asset", 32)}${pad("ours p25-p75", 22)}${pad("cdn p25-p75", 22)}verdict`);
+  const unsure = [];
   for (const row of rows) {
     if (row.ours.error || row.cdn.error) {
       console.log(`  ${pad(row.what, 32)}ours ${row.ours.error || "ok"}  cdn ${row.cdn.error || "ok"}`);
       continue;
     }
-    const ratio = row.cdn.median / row.ours.median;
-    // A 10% difference is inside the noise of one network and one moment, so it is
-    // reported as a tie rather than dressed up as a result.
-    const verdict = ratio > 1.1 ? `ours ${ratio.toFixed(2)}x faster`
-      : ratio < 0.91 ? `cdn ${(1 / ratio).toFixed(2)}x faster`
-      : "the same";
-    console.log(`  ${pad(row.what, 32)}${pad(`${row.ours.median.toFixed(0)} ms warm`, 20)}` +
-      `${pad(`${row.cdn.median.toFixed(0)} ms warm`, 20)}${verdict}`);
+    const v = verdict(row.ours, row.cdn);
+    if (!v.sure) unsure.push(`${row.what}: ${v.text}`);
+    console.log(`  ${pad(row.what, 32)}` +
+      `${pad(`${row.ours.p25.toFixed(0)}-${row.ours.p75.toFixed(0)} ms`, 22)}` +
+      `${pad(`${row.cdn.p25.toFixed(0)}-${row.cdn.p75.toFixed(0)} ms`, 22)}${v.text}`);
+  }
+  if (unsure.length) {
+    console.log("\n  not acted on, because the samples overlap or the gap is under 15%:");
+    for (const line of unsure) console.log(`    ${line}`);
   }
 
   console.log("\n  sizes and caching");
