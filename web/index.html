@@ -381,15 +381,22 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     style that asks for one silently loses every label.
   </p>
   <p class="note">
-    <strong>Which host is faster, and how that was decided.</strong> Measured, not
-    assumed: 15 requests to each host, from one machine on one network, and a
-    difference is only acted on when the middle halves of the two sets of samples do
-    not overlap and the gap is over 15%. On that test jsDelivr was clearly faster on
-    MapLibre GL and PMTiles, and the two were indistinguishable on the fonts, so the
-    libraries load from the CDN and the fonts and sprites are served from here. Those
-    numbers are one reader's view, and re-running the measurement is one command. The
-    fonts are also the case where it matters most that somebody else is not holding
-    the uptime: a glyph server that is down is a map with no labels.
+    <strong>Which host is faster, and what was decided about it.</strong> Measured
+    rather than assumed: interleaved requests, one at a time, on one connection, first
+    three samples dropped, time to first byte separated from the transfer. On that
+    test a CDN answered 10 to 45 ms sooner for every one of these files, which is the
+    whole 15% rule and a margin the samples clearly clear. The libraries load from
+    jsDelivr for that reason.
+  </p>
+  <p class="note">
+    The fonts and the sprites are served from here even though the same measurement
+    says a CDN would answer them about 10 ms sooner. That is a decision, not a
+    measurement. A map that comes from one hostname does not break when somebody
+    else's does, and a glyph server that is down is a map with no labels. If you
+    would rather have the 10 ms, point <code>glyphs</code> at
+    <code>protomaps.github.io/basemaps-assets/fonts</code> and it works with the same
+    path. One reader's numbers from one city, and re-running the comparison is one
+    command.
   </p>
 
   <h3>Four. About Leaflet</h3>

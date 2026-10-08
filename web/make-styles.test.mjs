@@ -539,6 +539,11 @@ await check("the page documents the fonts and the sprites it serves", () => {
   assert.ok(page.includes("Noto Sans Bold"), "the missing bold stack is not called out");
   assert.ok(page.includes("256 codepoints at a time"), "the page does not explain the 256 ranges");
   assert.ok(page.includes("local name"), "the page does not say why non-Latin ranges matter");
+  // The page states which host serves what, and why. If that goes stale the page
+  // makes a claim nobody measured, which is the one thing not to do here.
+  assert.ok(page.includes("Fonts, sprites and the libraries"), "the section is not titled for all three");
+  assert.ok(/decide[sd]?\b|decision, not a/.test(page), "the page does not separate the decision from the measurement");
+  assert.ok(page.includes("protomaps.github.io"), "the page does not offer the upstream alternative");
 });
 
 console.log(`${passed} passed, ${failed} failed`);

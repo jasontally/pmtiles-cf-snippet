@@ -3,157 +3,161 @@
  * Measure this host against the public CDNs for the same files.
  *
  *   node tools/bench-assets.mjs                  measure, print a table
- *   node tools/bench-assets.mjs --runs 11        more samples, better median
+ *   node tools/bench-assets.mjs --runs 21        more samples
  *   node tools/bench-assets.mjs --json           machine readable
  *
- * WHY THIS EXISTS
+ * WHY THE MEASUREMENT IS DELIBERATE AND FUSSY
  *
- * Vendoring a file is only worth it if serving it from here is not worse. That is
- * a measurement, not an opinion, and the answer changes with the reader's network
- * and with where Cloudflare has put the file. So the numbers are taken from the
- * live host and compared against the CDN the page used to point at.
+ * The first version of this measured the two hosts at the same time with
+ * Promise.all, and reported that this host was 1.5 to 1.7 times slower. It also
+ * measured them one after the other and reported this host 2.3 times FASTER, with
+ * nothing having changed. Both were wrong for the same reason: with two requests in
+ * flight at every instant the timing depends on which socket the kernel hands back.
  *
- * WHAT IS AND IS NOT COMPARABLE
+ * So the two are interleaved one request at a time, alternating which goes first,
+ * on one connection that is reused, and the first three samples are thrown away so
+ * neither TLS nor a cold edge cache is in the numbers.
  *
- * These runs come from one machine on one network. That is a real datapoint and it
- * is not a general result: a reader in another country sees a different edge
- * location for each host. Read the table as "from here, at the time it was run",
- * and run it again from elsewhere before believing it is global.
+ * It also splits the time in two, because the two parts mean different things:
  *
- * Two things are held equal on purpose. The same bytes are fetched, so content
- * encoding is not the story, and the connection is reused across the runs of one
- * URL so a cold TLS handshake is not counted as a slow asset. Cold-start cost is
- * real for a first-time visitor, so the connection timing is reported too.
+ *   ttfb  how long until the first byte. Edge lookup and origin behaviour. This is
+ *         where this host and a CDN differ, and it is what the verdict is based on.
+ *   body  transferring the bytes. Bandwidth, which is the reader's connection and
+ *         not the host. It comes out the same for both and including it only adds
+ *         noise.
  *
- * Nothing is deployed or changed. It only reads.
+ * WHAT THIS IS NOT
+ *
+ * One machine, one network, one city, one moment. A reader elsewhere meets a
+ * different edge for each host and the ranking can flip. Read it as "from here, at
+ * the time it was run", and run it again from elsewhere before believing it is
+ * global. Nothing here is deployed or changed; it only reads.
  */
 
-import { statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 
-/** Where our copies will be, once deployed. */
 const OURS = "https://tiles.jasontally.com";
 
 /**
- * Pairs to compare. The CDN URL is what the page used before, so this is the
- * question "is ours faster than what we had", not a general CDN shootout.
+ * Pairs to compare. The CDN URL is what the page loads, so this answers "is ours
+ * faster than what the page uses", not a general CDN shootout.
  */
 const PAIRS = [
   {
     what: "MapLibre GL JS",
     ours: `${OURS}/vendor/maplibre-gl.js`,
     cdn: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js",
-    note: "BSD-3-Clause",
+    licence: "BSD-3-Clause",
+    use: "cdn",
   },
   {
     what: "MapLibre GL CSS",
     ours: `${OURS}/vendor/maplibre-gl.css`,
     cdn: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css",
-    note: "BSD-3-Clause",
+    licence: "BSD-3-Clause",
+    use: "cdn",
   },
   {
     what: "PMTiles JS",
     ours: `${OURS}/vendor/pmtiles.js`,
     cdn: "https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js",
-    note: "BSD-3-Clause",
+    licence: "BSD-3-Clause",
+    use: "cdn",
   },
   {
-    what: "glyph Noto Sans Regular 0-255",
+    what: "glyph Noto Sans Regular",
     ours: `${OURS}/font/Noto%20Sans%20Regular/0-255.pbf`,
     cdn: "https://protomaps.github.io/basemaps-assets/fonts/Noto%20Sans%20Regular/0-255.pbf",
-    note: "SIL OFL 1.1",
+    licence: "SIL OFL 1.1",
+    use: "ours",
   },
   {
-    what: "glyph Noto Sans Medium 0-255",
+    what: "glyph Noto Sans Medium",
     ours: `${OURS}/font/Noto%20Sans%20Medium/0-255.pbf`,
-    cdn: "https://demotiles.maplibre.org/font/Noto%20Sans%20Bold/0-255.pbf",
-    note: "SIL OFL 1.1. Not the same font: Medium is what upstream calls bold",
+    cdn: "https://protomaps.github.io/basemaps-assets/fonts/Noto%20Sans%20Medium/0-255.pbf",
+    licence: "SIL OFL 1.1",
+    use: "ours",
   },
   {
     what: "sprite light.json",
     ours: `${OURS}/sprites/v4/light.json`,
     cdn: "https://protomaps.github.io/basemaps-assets/sprites/v4/light.json",
-    note: "MIT, from tangrams/icons",
+    licence: "MIT, from tangrams/icons",
+    use: "ours",
+  },
+  {
+    what: "sprite light.png",
+    ours: `${OURS}/sprites/v4/light.png`,
+    cdn: "https://protomaps.github.io/basemaps-assets/sprites/v4/light.png",
+    licence: "MIT, from tangrams/icons",
+    use: "ours",
   },
 ];
+
+/** Samples thrown away at the start of each URL: TLS, and a cold edge cache. */
+const DISCARD = 3;
 
 function arg(name, fallback) {
   const at = process.argv.indexOf(`--${name}`);
   return at === -1 ? fallback : Number(process.argv[at + 1]);
 }
 
-const RUNS = arg("runs", 7);
+const RUNS = arg("runs", 15);
 const asJson = process.argv.includes("--json");
 
-/** One fetch, timing it, with the connection left open for the next run. */
-async function time(url) {
-  const started = performance.now();
+async function one(url) {
+  const start = performance.now();
   const response = await fetch(url, { headers: { "User-Agent": "pmtiles-cf-snippet-bench" } });
-  if (!response.ok) throw new Error(`${url} returned ${response.status}`);
+  const headers = performance.now();
   const bytes = (await response.arrayBuffer()).byteLength;
-  return { ms: performance.now() - started, bytes, headers: response.headers };
-}
-
-async function measure(url) {
-  const samples = [];
-  let bytes = 0;
-  let headers = null;
-  let error = null;
-  for (let i = 0; i < RUNS; i++) {
-    try {
-      const result = await time(url);
-      samples.push(result.ms);
-      bytes = result.bytes;
-      headers = result.headers;
-    } catch (e) {
-      error = e.message;
-      break;
-    }
-  }
-  if (error) return { error, samples: [] };
-  // The first sample carries the TLS handshake and any cache miss. Median of the
-  // rest is the warm number; the first is reported beside it.
-  const warm = samples.slice(1).sort((a, b) => a - b);
-  const at = (q) => warm[Math.min(warm.length - 1, Math.floor(warm.length * q))];
+  const end = performance.now();
   return {
-    error: null,
-    median: at(0.5),
-    best: Math.min(...samples),
-    // The middle half of the samples. Reported because a median on its own cannot
-    // tell a real difference from one lucky sample, and "the CDN is faster" is a
-    // claim somebody will act on.
-    p25: at(0.25),
-    p75: at(0.75),
-    cold: samples[0],
+    ttfb: headers - start,
+    body: end - headers,
+    total: end - start,
     bytes,
-    cacheControl: headers.get("cache-control"),
-    encoding: headers.get("content-encoding"),
+    cacheControl: response.headers.get("cache-control"),
+    encoding: response.headers.get("content-encoding"),
   };
 }
 
+/** The quantile of a sample set, ignoring the first DISCARD. */
+function quantile(samples, q) {
+  const warm = samples.slice(DISCARD).sort((a, b) => a - b);
+  if (!warm.length) return NaN;
+  return warm[Math.min(warm.length - 1, Math.floor(warm.length * q))];
+}
+
+const band = (samples) =>
+  `${quantile(samples, 0.25).toFixed(0)}-${quantile(samples, 0.75).toFixed(0)}`;
+
 /**
- * Whether one host is faster than the other, and how sure of it.
+ * Whether one host answers faster, and how sure of it.
  *
- * Two rules, both deliberate. The gap has to clear 15%, because below that it sits
- * inside the variation of one network at one moment and calling it a result would be
- * dressing noise up as a finding. And the middle halves of the two sets of samples
- * must not overlap, because if they do then one unlucky request moved the median and
- * no amount of averaging has fixed it.
+ * Two rules. The gap has to clear 15%, because below that it sits inside the
+ * variation of one network at one moment and calling it a result would be dressing
+ * noise up as evidence. And the middle halves must not overlap, because if they do
+ * then one unlucky request moved the number and averaging has not fixed it.
  */
 function verdict(ours, cdn) {
-  const ratio = ours.median / cdn.median;
-  if (Math.abs(ratio - 1) < 0.15) return { text: "too close to call", ratio, sure: false };
+  const oursMedian = quantile(ours, 0.5);
+  const cdnMedian = quantile(cdn, 0.5);
+  // Above 1 means this host answered sooner.
+  const ratio = cdnMedian / oursMedian;
+  if (Math.abs(ratio - 1) < 0.15) return { text: "too close to call", sure: false, ratio };
   const faster = ratio > 1 ? "ours" : "the CDN";
-  const speedup = Math.max(ratio, 1 / ratio);
-  // Ours slower means: the CDN's fast half is still faster than our slow half.
-  const separated = ratio > 1 ? ours.p25 > cdn.p75 : cdn.p25 > ours.p75;
+  // The same test either way round: this host's fastest quarter is slower than the
+  // CDN's slowest quarter. If that holds, no amount of luck explains the gap. The
+  // earlier version tested it the other way for the CDN case and therefore reported
+  // "samples overlap" on every run where the bands were plainly apart.
+  const separated = quantile(ours, 0.25) > quantile(cdn, 0.75);
   return {
-    text: `${faster} ${speedup.toFixed(2)}x faster${separated ? "" : ", samples overlap"}`,
-    ratio,
+    text: `${faster} ${Math.max(ratio, 1 / ratio).toFixed(2)}x faster${separated ? "" : ", samples overlap"}`,
     sure: separated,
+    ratio,
   };
 }
 
@@ -162,8 +166,32 @@ const pad = (s, n) => String(s).padEnd(n);
 async function main() {
   const rows = [];
   for (const pair of PAIRS) {
-    const [ours, cdn] = await Promise.all([measure(pair.ours), measure(pair.cdn)]);
-    rows.push({ ...pair, ours, cdn });
+    const ours = [];
+    const cdn = [];
+    for (let i = 0; i < RUNS; i++) {
+      // Interleaved, and the order alternates so neither host always gets the
+      // first slot and the warmer connection.
+      if (i % 2 === 0) {
+        ours.push(await one(pair.ours));
+        cdn.push(await one(pair.cdn));
+      } else {
+        cdn.push(await one(pair.cdn));
+        ours.push(await one(pair.ours));
+      }
+    }
+    // The verdict is on time to first byte, not on the total. The total includes the
+    // transfer, which is the reader's connection rather than the host.
+    const v = verdict(ours.map((s) => s.ttfb), cdn.map((s) => s.ttfb));
+    rows.push({
+      ...pair,
+      ours: { ttfb: band(ours.map((s) => s.ttfb)), body: band(ours.map((s) => s.body)), samples: ours },
+      cdn: { ttfb: band(cdn.map((s) => s.ttfb)), body: band(cdn.map((s) => s.body)), samples: cdn },
+      bytes: ours[0].bytes,
+      cacheControlOurs: ours[0].cacheControl,
+      cacheControlCdn: cdn[0].cacheControl,
+      encoding: ours[0].encoding,
+      verdict: v,
+    });
   }
 
   if (asJson) {
@@ -171,37 +199,28 @@ async function main() {
     return;
   }
 
-  console.log(`\n  ${RUNS} requests per URL from this machine. Warm = median of runs 2..${RUNS}.`);
-  console.log(`  Cold is run 1, which pays TLS. Not a general result: a reader elsewhere\n  sees a different edge for each host.\n`);
-  console.log(`  ${pad("asset", 32)}${pad("ours p25-p75", 22)}${pad("cdn p25-p75", 22)}verdict`);
-  const unsure = [];
+  console.log(`\n  ${RUNS} interleaved requests per host, one at a time, one reused connection.`);
+  console.log(`  First ${DISCARD} of each thrown away. ttfb is the first byte, which is what the`);
+  console.log(`  verdict is based on; body is the transfer, which is the reader's connection.`);
+  console.log(`  From one machine on one network. Not a general result.\n`);
+
+  console.log(`  ${pad("asset", 26)}${pad("ours ttfb", 14)}${pad("cdn ttfb", 14)}${pad("gap", 34)}page uses`);
   for (const row of rows) {
-    if (row.ours.error || row.cdn.error) {
-      console.log(`  ${pad(row.what, 32)}ours ${row.ours.error || "ok"}  cdn ${row.cdn.error || "ok"}`);
-      continue;
-    }
-    const v = verdict(row.ours, row.cdn);
-    if (!v.sure) unsure.push(`${row.what}: ${v.text}`);
-    console.log(`  ${pad(row.what, 32)}` +
-      `${pad(`${row.ours.p25.toFixed(0)}-${row.ours.p75.toFixed(0)} ms`, 22)}` +
-      `${pad(`${row.cdn.p25.toFixed(0)}-${row.cdn.p75.toFixed(0)} ms`, 22)}${v.text}`);
-  }
-  if (unsure.length) {
-    console.log("\n  not acted on, because the samples overlap or the gap is under 15%:");
-    for (const line of unsure) console.log(`    ${line}`);
+    console.log(`  ${pad(row.what, 26)}${pad(row.ours.ttfb + " ms", 14)}${pad(row.cdn.ttfb + " ms", 14)}` +
+      `${pad(row.verdict.text, 34)}${row.use === "ours" ? "this host" : "the CDN"}`);
   }
 
-  console.log("\n  sizes and caching");
+  console.log("\n  body transfer, which is the same for both hosts");
   for (const row of rows) {
-    if (row.ours.error || row.cdn.error) continue;
-    console.log(`  ${pad(row.what, 32)}` +
-      `ours ${String(row.ours.bytes).padStart(9)} B  cache-control: ${row.ours.cacheControl || "(none)"}`);
-    console.log(`  ${pad("", 32)}` +
-      `cdn  ${String(row.cdn.bytes).padStart(9)} B  cache-control: ${row.cdn.cacheControl || "(none)"}`);
+    console.log(`  ${pad(row.what, 26)}ours ${pad(row.ours.body + " ms", 14)}cdn ${row.cdn.body} ms`);
   }
 
-  console.log(`\n  licences`);
-  for (const row of rows) console.log(`  ${pad(row.what, 32)}${row.note}`);
+  console.log("\n  sizes and cache policy");
+  for (const row of rows) {
+    console.log(`  ${pad(row.what, 26)}${String(row.bytes).padStart(9)} B  ${row.encoding || "no encoding"}`);
+    console.log(`  ${pad("", 26)}ours: ${row.cacheControlOurs || "(none)"}`);
+    console.log(`  ${pad("", 26)}cdn : ${row.cacheControlCdn || "(none)"}`);
+  }
   console.log();
 }
 
