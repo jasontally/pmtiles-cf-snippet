@@ -267,6 +267,9 @@ async function readLayout(tag) {
  * constants, and a data refresh has to put new ones there.
  */
 function writeSnippetLayout(layout) {
+  // The guard lives here rather than in the caller, so a new caller cannot
+  // rewrite the reader by accident. A plan run has to be safe by construction.
+  if (planOnly) return;
   const source = readFileSync(SNIPPET, "utf8");
   const before = source;
   const patched = source.replace(
