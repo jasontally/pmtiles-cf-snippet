@@ -19,17 +19,17 @@
  * and the script downloads it. With neither, the split is skipped, because the
  * repository holds no archive and 118 GiB cannot be committed.
  *
- * In deploy, the only required variable is CLOUDFLARE_API_TOKEN. It needs
- * Workers Scripts Edit for the assets and Snippets Edit for the snippet. The
- * zone is found from SNIPPET_HOST when CLOUDFLARE_ZONE_ID is not set, so a build
- * needs one secret, not three.
- *
- * Required environment for the snippet step:
- *   CLOUDFLARE_API_TOKEN   Workers Scripts Edit, Snippets Edit
+ * In deploy, the build needs no token of its own. Workers Builds injects
+ * CLOUDFLARE_API_TOKEN into the build environment for wrangler, and the build
+ * command reads the same value. Do not add it as a build secret: that replaces
+ * Cloudflare's own token. It needs Workers Scripts Edit for the assets and
+ * Snippets Edit for the snippet. The zone comes from CLOUDFLARE_ZONE_ID, or is
+ * found from SNIPPET_HOST when that is not set.
  *
  * Optional environment:
  *   CLOUDFLARE_ZONE_ID     set to skip the zone lookup
  *   CLOUDFLARE_ACCOUNT_ID  accepted for compatibility, not used
+ *   CLOUDFLARE_API_TOKEN   injected by Workers Builds, do not set it
  *   SNIPPET_HOST           host the rule matches (default: tiles.example.com).
  *                          Also used to find the zone.
  *   SNIPPET_RULE           full rule expression, overrides SNIPPET_HOST
@@ -55,6 +55,9 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import {
+  foreignRules, lostRules, mergeSnippetRule, rulesMatch,
+} from "./snippet-rules.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, "public");
@@ -64,6 +67,10 @@ const TOOL = join(ROOT, "shard-pmtiles.py");
 const API = "https://api.cloudflare.com/client/v4";
 
 const MAX_SNIPPET_BYTES = 32 * 1024;
+
+// File name inside the multipart upload, and the entry point named in metadata.
+// Cloudflare requires the two to agree.
+const MODULE_FILE = "snippet.js";
 
 // Same content shard-pmtiles.py writes. Kept here so a build that skips the
 // split still leaves the assets directory in a deployable state.
@@ -257,10 +264,12 @@ function deployAssets() {
   if (files > 100000) {
     fail(`${files} files exceeds the 100,000 file limit. Raise the part size.`);
   }
-  // wrangler reads its own credentials from CLOUDFLARE_API_TOKEN or its own
-  // config, so no account id is needed here. Only the snippet step needs one,
-  // and that resolves the zone from the host.
-  requireEnv("CLOUDFLARE_API_TOKEN");
+  // wrangler reads its own credentials from the environment. No account id is
+  // needed here, and the snippet step only needs a zone.
+  //
+  // CLOUDFLARE_API_TOKEN needs no build variable. Workers Builds injects it for
+  // wrangler, and the build command sees the same value. Adding it as a build
+  // secret would replace Cloudflare's own token, so do not.
   // Cloudflare compares a content hash per file and skips unchanged ones, so a
   // build that changed a few parts uploads only those files.
   run("npx", ["--yes", "wrangler@latest", "deploy"], { quiet: false });
@@ -299,7 +308,7 @@ async function doctor() {
 
   try {
     const verified = await apiCall("/user/tokens/verify");
-    console.log(`\ntoken status: ${verified.result?.status || "unknown"}`);
+    console.log(`\ntoken status: ${verified?.status || "unknown"}`);
   } catch (error) {
     console.log(`\ntoken check failed: ${error.message}`);
     return;
@@ -308,11 +317,20 @@ async function doctor() {
   try {
     const zone = await resolveZone();
     console.log(`zone: ${zone.name || "(id only)"} = ${zone.id}`);
-    const rules = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`);
-    console.log(`existing snippet rules: ${(rules.result?.rules || []).length}`);
+    const rules = (await apiCall(`/zones/${zone.id}/snippets/snippet_rules`)) || [];
     const named = env("SNIPPET_NAME", "pmtiles");
-    const has = (rules.result?.rules || []).some((r) => r.snippet_name === named);
-    console.log(`snippet ${named}: ${has ? "has a rule" : "has no rule"}`);
+    const ours = rules.filter((r) => r.snippet_name === named);
+    const others = foreignRules(rules, named);
+    console.log(`snippet rules on the zone: ${rules.length}`);
+    console.log(
+      `  ours (${named}): ${ours.length}` +
+      (ours.length ? ` - ${ours.map((r) => r.description).join(" | ")}` : "")
+    );
+    console.log(
+      `  owned by others: ${others.length} ` +
+      `${others.map((r) => r.snippet_name).join(", ") || "none"}`
+    );
+    console.log(`\nrule we would install: ${snippetRule()}`);
   } catch (error) {
     console.log(`zone check failed: ${error.message}`);
   }
@@ -442,7 +460,7 @@ async function apiCall(path, options = {}) {
     const detail = JSON.stringify(payload.errors || payload).slice(0, 400);
     fail(`${options.method || "GET"} ${path} returned ${response.status}: ${detail}`);
   }
-  return payload;
+  return payload.result;
 }
 
 /**
@@ -461,10 +479,9 @@ async function resolveZone() {
     fail("set CLOUDFLARE_ZONE_ID, or set SNIPPET_HOST so the zone can be found by name");
   }
   for (const candidate of zoneCandidates(host)) {
-    const found = await apiCall(
+    const zones = await apiCall(
       `/zones?name=${encodeURIComponent(candidate)}&per_page=5`
-    );
-    const zones = found.result || [];
+    ) || [];
     if (zones.length === 1) {
       console.log(`zone ${zones[0].name} = ${zones[0].id} (found from ${candidate})`);
       return {
@@ -516,39 +533,92 @@ async function deploySnippet() {
   const digest = createHash("sha256").update(small).digest("hex").slice(0, 12);
   console.log(`sha256:${digest}`);
 
+  const expression = snippetRule();
+
+  // The rule description is the only place the zone records which build is
+  // installed, because the API will not hand the snippet code back. Without it
+  // there is no way to tell a zone running last week's build from this week's,
+  // short from uploading again. Workers Builds injects this on every build.
+  const buildId =
+    process.env.WORKERS_CI_BUILD_UUID || new Date().toISOString().slice(0, 19) + "Z";
+  const description = env(
+    "SNIPPET_RULE_DESCRIPTION",
+    `PMTiles range requests (${buildId})`
+  );
+
+  const rulesRoute = `/zones/${zone.id}/snippets/snippet_rules`;
+
+  // A zone that never had a rule list 404s, which means "no rules" rather than
+  // a failure. Anything else is real.
+  const observed = await apiCall(rulesRoute).catch((error) => {
+    if (/\b404\b/.test(error.message)) return null;
+    throw error;
+  });
+
+  // PUT replaces the WHOLE list and this zone is shared. Merge into whatever is
+  // installed rather than replacing the list, or another project's rule goes.
+  const ourRule = { snippet_name: name, expression, description, enabled: true };
+  const desiredRules = mergeSnippetRule(observed, ourRule);
+  const foreign = foreignRules(observed, name);
+  const needsRules = !rulesMatch(desiredRules, observed);
+
+  const installed = (observed || []).find((rule) => rule.snippet_name === name);
+  console.log(`zone     ${zone.name || zone.id} (${zone.id})`);
+  console.log(`current  ${observed ? `${observed.length} rule(s)` : "no rule list"}`);
+  console.log(
+    `keeping  ${foreign.length} rule(s) owned by others: ` +
+    `${foreign.map((r) => r.snippet_name).join(", ") || "none"}`
+  );
+  console.log(`stamp    ${installed ? installed.description : "(no rule for this snippet)"}`);
+  console.log(`build    ${buildId}`);
+  console.log(`rule     ${expression}`);
+  console.log(`plan     rules: ${needsRules ? "update" : "already current"}`);
+
   // The Snippets API takes the code as multipart form data.
   const form = new FormData();
-  form.append("files", new Blob([small], { type: "application/javascript" }), "main.js");
-  form.append("metadata", JSON.stringify({ main_module: "main.js" }));
-
+  form.append("metadata", JSON.stringify({ main_module: MODULE_FILE }));
+  form.append(
+    MODULE_FILE,
+    new Blob([small], { type: "text/javascript" }),
+    MODULE_FILE
+  );
   const upload = await apiCall(`/zones/${zone.id}/snippets/${name}`, {
     method: "PUT",
     body: form,
   });
-  console.log(`snippet ${name} uploaded (${upload.result?.snippet_name || name})`);
-
-  const expression = snippetRule();
-
-  // The rules endpoint replaces the whole set, so read the current rules first
-  // and send them all back with ours replaced or appended.
-  const existing = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`);
-  const current = existing.result?.rules || [];
-  const kept = current.filter((rule) => rule.snippet_name !== name);
-  const rules = [...kept, {
-    description: env("SNIPPET_RULE_DESCRIPTION", "PMTiles range requests"),
-    enabled: true,
-    expression,
-    snippet_name: name,
-  }];
-
-  const applied = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ rules }),
-  });
   console.log(
-    `snippet rules set: ${applied.result?.rules?.length ?? rules.length} rules, ` +
-    `expression ${expression}`
+    `uploaded  snippet_name=${upload?.snippet_name || name} ` +
+    `modified_on=${upload?.modified_on ?? "n/a"}`
+  );
+
+  if (needsRules) {
+    await apiCall(rulesRoute, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ rules: desiredRules }),
+    });
+    console.log(`rules     replaced with ${desiredRules.length} rule(s)`);
+  } else {
+    console.log("rules     unchanged");
+  }
+
+  // Read the list back and prove every foreign rule survived. A PUT that drops
+  // another project's rule is silent: it returns 200 with the shortened list.
+  // This is the only place that failure becomes visible.
+  const finalRules = (await apiCall(rulesRoute)) || [];
+  const lost = lostRules(foreign, finalRules);
+  if (lost.length > 0) {
+    console.error(
+      `ABORT: the PUT removed rule(s) owned by another project: ` +
+      `${lost.map((r) => r.snippet_name).join(", ")}. ` +
+      `Restore them from the API or from the other project before anything else.`
+    );
+    process.exit(1);
+  }
+  const survivors = foreignRules(finalRules, name);
+  console.log(
+    `verify    ${finalRules.length} rule(s); ${survivors.length} foreign rule(s) intact: ` +
+    `${survivors.map((r) => r.snippet_name).join(", ") || "none"}`
   );
 }
 
@@ -587,13 +657,6 @@ async function prepare() {
   const out = join(DIST_DIR, "snippet.min.js");
   writeFileSync(out, small);
   console.log(`wrote ${out} (${Buffer.byteLength(small)} bytes)`);
-  // The deploy step needs the token, so report early rather than after the
-  // whole split. Without this the build fails only at the last step.
-  if (!process.env.CLOUDFLARE_API_TOKEN) {
-    console.log(
-      "warning: CLOUDFLARE_API_TOKEN is unset, so the deploy step cannot upload."
-    );
-  }
   return haveAssets;
 }
 

@@ -62,18 +62,28 @@ async function mockApi() {
         return;
       }
       if (req.url.endsWith("/snippet_rules")) {
+        // The API returns the rule list as a bare array in `result`, and each
+        // rule carries read-only id and last_updated fields.
         res.end(JSON.stringify({
           success: true,
-          result: {
-            rules: [
-              {
-                description: "an existing rule",
-                enabled: true,
-                expression: "true",
-                snippet_name: "other",
-              },
-            ],
-          },
+          result: [
+            {
+              id: "rule-icanhazip",
+              snippet_name: "icanhazip",
+              expression: '(http.host in {"ip.jasontally.com"})',
+              description: "another project on this zone",
+              enabled: true,
+              last_updated: "2026-10-01T00:00:00Z",
+            },
+            {
+              id: "rule-mcp",
+              snippet_name: "mcp_lookup",
+              expression: '(http.host eq "mac.jasontally.com")',
+              description: "another project on this zone",
+              enabled: true,
+              last_updated: "2026-10-01T00:00:00Z",
+            },
+          ],
         }));
         return;
       }
@@ -175,48 +185,117 @@ await check("uploads the minified snippet and sets the rule", async () => {
   }
 });
 
-await check("keeps existing snippet rules when setting ours", async () => {
+await check("keeps every other snippet rule on the shared zone", async () => {
   const api = await mockApi();
   try {
     const run = await runBuild(CREDENTIALS, api.base);
-    assert.equal(run.status, 0, `build failed:\n${run.stderr}`);
+    assert.equal(run.status, 0, `build failed:\n${run.stdout}\n${run.stderr}`);
 
-    // The build reads the current rules then writes the set, so there are two
-    // calls. Take the last one, which carries the body.
-    const calls = api.requests.filter((r) => r.url === "/zones/zone123/snippets/snippet_rules");
-    assert.ok(calls.length >= 1, "did not touch the snippet rules");
-    const sent = JSON.parse(calls.at(-1).body);
-    assert.ok(Array.isArray(sent.rules));
-    assert.ok(
-      sent.rules.some((r) => r.snippet_name === "other"),
-      "the endpoint replaces the whole set, so an existing rule was dropped"
+    // PUT replaces the whole list, so the body must carry the other rules.
+    const puts = api.requests.filter(
+      (r) => r.url.endsWith("/snippet_rules") && r.method === "PUT"
     );
-    const mine = sent.rules.find((r) => r.snippet_name === "pmtiles");
-    assert.ok(mine, "our rule is missing");
-    assert.ok(mine.expression.includes(".pmtiles"), `expression was ${mine.expression}`);
-    assert.equal(mine.enabled, true);
+    assert.ok(puts.length >= 1, "did not PUT any rules");
+    const sent = JSON.parse(puts.at(-1).body).rules;
+
+    const names = sent.map((r) => r.snippet_name);
+    assert.ok(names.includes("icanhazip"), `icanhazip was dropped: ${JSON.stringify(names)}`);
+    assert.ok(names.includes("mcp_lookup"), `mcp_lookup was dropped: ${JSON.stringify(names)}`);
+    assert.ok(names.includes("pmtiles"), "our rule is missing");
+    assert.equal(new Set(names).size, names.length, "duplicate rules were sent");
+
+    // A foreign rule keeps its own expression and enabled flag.
+    const kept = sent.find((r) => r.snippet_name === "icanhazip");
+    assert.equal(kept.expression, '(http.host in {"ip.jasontally.com"})');
+    assert.equal(kept.enabled, true);
+    assert.equal(kept.description, "another project on this zone");
+
+    // Read-only fields must not be sent back.
+    for (const rule of sent) {
+      assert.equal(rule.id, undefined, "id is read-only");
+      assert.equal(rule.last_updated, undefined, "last_updated is read-only");
+    }
   } finally {
     await api.close();
   }
 });
 
-await check("a second build does not duplicate the rule", async () => {
+await check("does not reorder the rule list on a redeploy", async () => {
   const api = await mockApi();
   try {
     await runBuild(CREDENTIALS, api.base);
     await runBuild(CREDENTIALS, api.base);
-    const rules = api.requests
-      .filter((r) => r.url === "/zones/zone123/snippets/snippet_rules")
-      .at(-1);
-    const sent = JSON.parse(rules.body);
-    const ours = sent.rules.filter((r) => r.snippet_name === "pmtiles");
-    assert.equal(ours.length, 1, `expected 1 rule for us, got ${ours.length}`);
-    assert.equal(sent.rules.length, 2, "expected our rule plus the existing one");
+    const puts = api.requests.filter(
+      (r) => r.url.endsWith("/snippet_rules") && r.method === "PUT"
+    );
+    const names = JSON.parse(puts.at(-1).body).rules.map((r) => r.snippet_name);
+    assert.deepEqual(
+      names,
+      ["icanhazip", "mcp_lookup", "pmtiles"],
+      `the list changed order: ${JSON.stringify(names)}`
+    );
   } finally {
     await api.close();
   }
 });
 
+await check("reports the foreign rules it kept and verifies they survived", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(CREDENTIALS, api.base);
+    assert.match(
+      run.stdout,
+      /keeping {2}2 rule\(s\) owned by others: icanhazip, mcp_lookup/,
+      "must name the rules it kept"
+    );
+    assert.match(
+      run.stdout,
+      /verify {4}\d+ rule\(s\); 2 foreign rule\(s\) intact/,
+      "must read the list back and confirm the foreign rules"
+    );
+  } finally {
+    await api.close();
+  }
+});
+
+await check("records the build id so a stale zone is visible", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(
+      { ...CREDENTIALS, WORKERS_CI_BUILD_UUID: "11111111-2222-3333-4444-555555555555" },
+      api.base
+    );
+    assert.match(run.stdout, /build {4}11111111-2222-3333-4444-555555555555/);
+    const puts = api.requests.filter(
+      (r) => r.url.endsWith("/snippet_rules") && r.method === "PUT"
+    );
+    const ours = JSON.parse(puts.at(-1).body).rules.find((r) => r.snippet_name === "pmtiles");
+    assert.ok(
+      ours.description.includes("11111111-2222-3333-4444-555555555555"),
+      `description was ${JSON.stringify(ours.description)}`
+    );
+  } finally {
+    await api.close();
+  }
+});
+
+await check("uploads the snippet as multipart with main_module", async () => {
+  const api = await mockApi();
+  try {
+    await runBuild(CREDENTIALS, api.base);
+    const upload = api.requests.find((r) => /\/snippets\/pmtiles$/.test(r.url));
+    assert.equal(upload.method, "PUT");
+    assert.ok(
+      String(upload.headers["content-type"]).startsWith("multipart/form-data"),
+      `expected multipart, got ${upload.headers["content-type"]}`
+    );
+    assert.ok(upload.body.includes('name="metadata"'), "metadata part is required");
+    assert.ok(upload.body.includes('"main_module"'), "metadata must name the entry point");
+    assert.ok(upload.body.includes('name="snippet.js"'), "the module part must be present");
+  } finally {
+    await api.close();
+  }
+});
 await check("uses SNIPPET_RULE when it is set", async () => {
   const api = await mockApi();
   try {
@@ -225,8 +304,10 @@ await check("uses SNIPPET_RULE when it is set", async () => {
       api.base
     );
     assert.equal(run.status, 0, run.stderr);
-    const calls = api.requests.filter((r) => r.url === "/zones/zone123/snippets/snippet_rules");
-    const mine = JSON.parse(calls.at(-1).body).rules.find((r) => r.snippet_name === "pmtiles");
+    const puts = api.requests.filter(
+      (r) => r.url.endsWith("/snippet_rules") && r.method === "PUT"
+    );
+    const mine = JSON.parse(puts.at(-1).body).rules.find((r) => r.snippet_name === "pmtiles");
     assert.equal(mine.expression, 'http.host eq "tiles.example.com"');
   } finally {
     await api.close();

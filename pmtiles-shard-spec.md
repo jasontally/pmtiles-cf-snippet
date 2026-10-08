@@ -407,7 +407,8 @@ Every tile must draw.
 python3 shard-pmtiles.py --selftest   # section planning and byte reconstruction
 node snippet-test.js                  # the snippet against a real split, 20 checks
 node minify-test.js                   # the minifier, 19 checks
-node deploy-test.js                   # the deploy requests, against a mock API, 16 checks
+node --test snippet-rules.test.mjs   # the rule list merge, 13 checks
+node deploy-test.js                   # the deploy requests, against a mock API, 19 checks
 ```
 
 `snippet-test.js` splits a small synthetic archive with the real tool, then
@@ -454,17 +455,35 @@ Running wrangler in the build step as well would upload the asset set twice.
 The `name` in `wrangler.jsonc` must match the Worker name in the dashboard, or
 the build fails. It is `pmtiles-cf-snippet`.
 
-Only one secret is required, `CLOUDFLARE_API_TOKEN`, with Workers Scripts Edit
-for the assets and Snippets Edit for the snippet. Set `SNIPPET_HOST` to
-`tiles.jasontally.com`. The build looks the zone up through the API, so
-`CLOUDFLARE_ZONE_ID` is optional. See the header of `build.mjs` for the full
-list of environment variables.
+Only `CLOUDFLARE_ZONE_ID` and `SNIPPET_HOST` need setting. Do not set
+`CLOUDFLARE_API_TOKEN`: Workers Builds injects that name itself for its own
+token, and the build command reads the same value. Setting it would replace
+Cloudflare's token. It needs Workers Scripts Edit for the assets and Snippets
+Edit for the snippet. `CLOUDFLARE_ACCOUNT_ID` is accepted and not used.
 
-`node build.mjs doctor` reports which variables are set, verifies the token,
-resolves the zone, and counts the existing snippet rules. It never deploys. Use
-it to check a setup without waiting for a build.
+### 14.1 The shared zone
 
-### 14.1 Preview branches
+`PUT /zones/{id}/snippets/snippet_rules` replaces the entire list. It is not a
+per-rule update. This zone also runs the `icanhazip` snippet and the
+`mcp_lookup` snippet from another project. A build that sent only its own rule
+would delete both, and the API returns `200` with the shortened list, so the loss
+is silent.
+
+The build reads the list, merges its own rule in place, strips the read-only
+`id` and `last_updated` fields, skips the write when nothing changed, then reads
+the list back and fails the build if any foreign rule vanished. The logic is in
+`snippet-rules.mjs` as pure functions, with tests in
+`snippet-rules.test.mjs`.
+
+This bug was present and would have caused the loss. `apiCall` returned the whole
+envelope and the code read `result.rules`, while the API returns `result` as a
+bare array, so the read produced an empty list and the write sent one rule.
+
+`node build.mjs doctor` reports which variables are set without printing any
+value, verifies the token, resolves the zone, and lists every rule split into
+ours and owned by others. It never deploys.
+
+### 14.2 Preview branches
 
 Preview branches run the preview command, not the deploy command. So a preview
 build uploads no assets and no snippet. A snippet is a zone resource, so a
@@ -474,7 +493,7 @@ preview cannot have its own. A preview Worker serves the part files at its
 
 To test a preview, request a part file directly. See test 1 in section 12.
 
-### 14.2 Why the snippet goes second
+### 14.3 Why the snippet goes second
 
 The snippet answers `tiles.jasontally.com/basemap.pmtiles`. If it went live
 before the parts, every tile request would return `502` until the upload
@@ -489,6 +508,8 @@ are in place.
 | `snippet.js` | The Cloudflare Snippet. |
 | `build.mjs` | Split, verify, upload, minify, deploy. |
 | `snippet-test.js` | Drives the snippet against a real split. |
+| `snippet-rules.mjs` | Pure helpers for the zone-wide rule list. |
+| `snippet-rules.test.mjs` | Tests that the merge cannot drop another rule. |
 | `minify-test.js` | Checks the minifier. |
 | `deploy-test.js` | Checks the deploy requests against a mock API. |
 | `wrangler.jsonc` | Worker name and assets directory. |

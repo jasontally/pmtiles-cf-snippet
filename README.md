@@ -41,6 +41,8 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `wrangler.jsonc` | Worker name and assets directory. No `main`. |
 | `snippet-test.js` | Drives the real snippet against a real split. |
 | `minify-test.js` | Checks the minifier. |
+| `snippet-rules.mjs` | Pure helpers for the zone-wide snippet rule list. |
+| `snippet-rules.test.mjs` | Tests that the merge cannot drop another rule. |
 | `deploy-test.js` | Checks the deploy requests against a mock API. |
 | `pmtiles-shard-spec.md` | Full specification and measurements. |
 
@@ -122,29 +124,52 @@ archive is uploaded. The 65,259 part files stay out of the repository.
 
 ### Build settings
 
-One secret is enough:
+**Do not add `CLOUDFLARE_API_TOKEN` as a build variable.** Workers Builds injects
+that name itself for the token it holds. Setting it would replace Cloudflare's
+own token. The build command reads the same value, so nothing needs adding.
 
-| Setting | Kind | Value |
-|---|---|---|
-| `CLOUDFLARE_API_TOKEN` | Secret | Needs Workers Scripts Edit and Snippets Edit |
-| `SNIPPET_HOST` | Variable | `tiles.jasontally.com` |
+`CLOUDFLARE_ZONE_ID` and `SNIPPET_HOST` are enough. `SNIPPET_HOST` sets the
+rule; `CLOUDFLARE_ZONE_ID` skips the zone lookup. `CLOUDFLARE_ACCOUNT_ID` is
+accepted and not used, because wrangler reads its own credentials.
 
-`SNIPPET_HOST` sets the rule and finds the zone. The build looks the zone up
-through the API, so `CLOUDFLARE_ZONE_ID` is optional. `CLOUDFLARE_ACCOUNT_ID` is
-accepted for compatibility and is not used, because wrangler reads its own
-credentials.
+The token needs Workers Scripts Edit for the assets and Snippets Edit for the
+snippet. Note that the Wrangler OAuth token from `npx wrangler login` is not
+enough: it gets `Authentication error` code 10000 on `GET /zones/{id}/snippets`.
 
 Set `SNIPPET_RULE` instead of `SNIPPET_HOST` only when the rule must differ from
 a host match plus a `.pmtiles` path.
 
+### This zone is shared
+
+`PUT /zones/{id}/snippets/snippet_rules` **replaces the whole rule list.** It is
+not a per-rule update. The zone also runs the `icanhazip` snippet and the
+`mcp_lookup` snippet from
+[mac-address-lookup](https://github.com/jasontally/mac-address-lookup). A build
+that sent only its own rule would delete both, and the API answers `200` with
+the shortened list, so the loss is silent.
+
+So the build:
+
+1. Reads the current list.
+2. Merges its own rule in place, keeping the position it already has.
+3. Strips the read-only `id` and `last_updated` fields, which the API rejects.
+4. Skips the write when the list already matches.
+5. Reads the list back and reports any rule that vanished. A lost rule fails
+   the build with the names.
+
+`snippet-rules.mjs` holds that logic as pure functions, and
+`snippet-rules.test.mjs` has 13 tests on it. The deploy checks add two more
+against a mock API that returns two foreign rules.
+
 Check the setup without waiting for a build:
 
 ```sh
-CLOUDFLARE_API_TOKEN=... SNIPPET_HOST=tiles.jasontally.com npm run doctor
+npm run doctor
 ```
 
-It reports which variables are set, verifies the token, resolves the zone, and
-counts the existing snippet rules. It never deploys.
+It prints which variables are set without printing any value, verifies the token,
+resolves the zone, and lists every rule on the zone split into ours and owned by
+others. It never deploys.
 
 To upload the asset parts, set `ARCHIVE_URL` to the `.pmtiles` URL or
 `ARCHIVE_PATH` to a file on the build machine. Without either, the build skips
