@@ -1,5 +1,7 @@
-# The asset tree. 65,259 part files and 118 GiB. Never commit these.
-public/
+# The asset tree: 65,259 part files and 118 GiB. Never commit those. The
+# _headers file is committed so the public directory always exists, because
+# wrangler refuses to deploy when the assets directory is missing.
+public/*
 !public/_headers
 
 # The minified snippet, written by the build.

@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -346,6 +346,19 @@ await check("the wrangler name matches the Worker name", async () => {
   const name = /"name"\s*:\s*"([^"]+)"/.exec(config);
   assert.ok(name, "wrangler.jsonc has no name");
   assert.equal(name[1], "pmtiles-cf-snippet", "the Worker name must match the dashboard");
+});
+
+await check("public/_headers is committed so the assets directory exists", () => {
+  // wrangler refuses to deploy when the assets directory is missing, and the
+  // first build has no archive, so nothing creates public/.
+  const headers = join(dirname(BUILD), "public", "_headers");
+  assert.ok(existsSync(headers), "public/_headers must be committed");
+  const text = readFileSync(headers, "utf8");
+  assert.ok(text.includes("/s/*"), "the rule must cover the part files");
+  assert.ok(
+    text.includes("max-age=31536000"),
+    "parts are immutable, so they must be cached for a year"
+  );
 });
 
 await check("reports the minified size and the hash", async () => {

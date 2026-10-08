@@ -11,6 +11,9 @@
 
   "assets": {
     // Written by shard-pmtiles.py. Contains _headers and s/<archive>/...
+    // public/_headers is committed, so this directory always exists. wrangler
+    // refuses to deploy when the assets directory is missing, and the directory
+    // would be missing on any build that runs before the first split.
     "directory": "./public"
   }
 }

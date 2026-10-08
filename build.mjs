@@ -54,6 +54,14 @@ const API = "https://api.cloudflare.com/client/v4";
 
 const MAX_SNIPPET_BYTES = 32 * 1024;
 
+// Same content shard-pmtiles.py writes. Kept here so a build that skips the
+// split still leaves the assets directory in a deployable state.
+const HEADERS_FILE =
+  "/s/*\n" +
+  "\tCache-Control: public, max-age=31536000, immutable\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
+  "\tAccess-Control-Expose-Headers: Content-Length\n";
+
 const env = (key, fallback) => {
   const value = process.env[key];
   return value === undefined || value === "" ? fallback : value;
@@ -445,6 +453,15 @@ async function prepare() {
     verify(archive);
   } else {
     console.log("\n=== no asset tree, skipping verify");
+  }
+
+  // wrangler refuses to deploy when the assets directory is missing, and the
+  // directory is missing on any build that runs before the first split. The
+  // split writes _headers; this covers a build that skipped it.
+  if (!existsSync(join(PUBLIC_DIR, "_headers"))) {
+    console.log("writing public/_headers");
+    mkdirSync(PUBLIC_DIR, { recursive: true });
+    writeFileSync(join(PUBLIC_DIR, "_headers"), HEADERS_FILE);
   }
 
   step("minify the snippet");
