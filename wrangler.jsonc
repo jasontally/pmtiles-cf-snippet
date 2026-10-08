@@ -1,0 +1,16 @@
+{
+  // Workers Static Assets only. There is no Worker script: the Snippet serves
+  // the .pmtiles URL and the assets platform serves the part files.
+  //
+  // main is deliberately absent. With no main, every request that matches a
+  // part file is served by the assets platform for free, and no Worker is
+  // invoked and billed. See pmtiles-shard-spec.md section 10.
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "pmtiles-assets",
+  "compatibility_date": "2026-10-07",
+
+  "assets": {
+    // Written by shard-pmtiles.py. Contains _headers and s/<archive>/...
+    "directory": "./public"
+  }
+}

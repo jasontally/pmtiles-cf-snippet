@@ -1,0 +1,13 @@
+# The asset tree. 65,259 part files and 118 GiB. Never commit these.
+public/
+!public/_headers
+
+# The archive and any local copy.
+*.pmtiles
+.cache/
+
+node_modules/
+.wrangler/
+__pycache__/
+*.pyc
+.DS_Store

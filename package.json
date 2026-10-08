@@ -1,0 +1,18 @@
+{
+  "name": "pmtiles-cf-snippet",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Serve a 118 GiB PMTiles archive from Cloudflare Static Assets with a Snippet",
+  "scripts": {
+    "test": "python3 shard-pmtiles.py --selftest && node snippet-test.js && node minify-test.js && node deploy-test.js",
+    "test:split": "python3 shard-pmtiles.py --selftest",
+    "test:snippet": "node snippet-test.js",
+    "test:minify": "node minify-test.js",
+    "test:deploy": "node deploy-test.js",
+    "build": "node build.mjs",
+    "deploy": "node build.mjs",
+    "split": "python3 shard-pmtiles.py",
+    "verify": "python3 shard-pmtiles.py"
+  }
+}
