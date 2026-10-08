@@ -40,6 +40,27 @@ async function mockApi() {
       // to the live array would be overwritten by the second.
       requests.push({ method: req.method, url: req.url, headers: req.headers, body });
       res.setHeader("content-type", "application/json");
+      if (req.url.startsWith("/zones?name=")) {
+        // Answer a zone name lookup the way Cloudflare would.
+        const wanted = decodeURIComponent(new URL(req.url, "http://x").searchParams.get("name"));
+        if (wanted === "example.com") {
+          res.end(JSON.stringify({
+            success: true,
+            result: [{
+              id: "zone-from-lookup",
+              name: "example.com",
+              account: { id: "acct-from-lookup" },
+            }],
+          }));
+          return;
+        }
+        res.end(JSON.stringify({ success: true, result: [] }));
+        return;
+      }
+      if (req.url === "/user/tokens/verify") {
+        res.end(JSON.stringify({ success: true, result: { status: "active" } }));
+        return;
+      }
       if (req.url.endsWith("/snippet_rules")) {
         res.end(JSON.stringify({
           success: true,
@@ -333,6 +354,50 @@ await check("a missing archive skips the split instead of failing", async () => 
       run.stdout,
       /no ARCHIVE_PATH or ARCHIVE_URL, skipping the split/,
       "should say it skipped the split"
+    );
+  } finally {
+    await api.close();
+  }
+});
+
+await check("finds the zone from SNIPPET_HOST when no zone id is set", async () => {
+  const api = await mockApi();
+  try {
+    // Without a zone id the build must look the zone up by name. Answer the
+    // lookup the way Cloudflare would.
+    const original = api.requests;
+    await runBuild(
+      { ...CREDENTIALS, CLOUDFLARE_ZONE_ID: "", SNIPPET_HOST: "tiles.example.com" },
+      api.base,
+      "deploy"
+    );
+    const lookup = original.find((r) => r.url.startsWith("/zones?name="));
+    assert.ok(lookup, "did not look the zone up by name");
+    assert.ok(lookup.url.includes("tiles.example.com"), lookup.url);
+    // It must then use the returned id for the snippet calls.
+    const upload = original.find((r) => /^\/zones\/[^/]+\/snippets\/pmtiles$/.test(r.url));
+    assert.ok(upload, "did not upload with the resolved zone id");
+    assert.ok(
+      upload.url.startsWith("/zones/zone-from-lookup/"),
+      `upload used ${upload.url}, expected the id from the lookup`
+    );
+  } finally {
+    await api.close();
+  }
+});
+
+await check("doctor reports the settings without changing anything", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(CREDENTIALS, api.base, "doctor");
+    assert.equal(run.status, 0, `doctor must not fail:\n${run.stderr}`);
+    assert.match(run.stdout, /build settings/);
+    assert.match(run.stdout, /CLOUDFLARE_API_TOKEN/);
+    // A diagnostic must never deploy.
+    assert.equal(
+      api.requests.filter((r) => /\/snippets\/pmtiles$/.test(r.url)).length,
+      0,
+      "doctor must not upload the snippet"
     );
   } finally {
     await api.close();

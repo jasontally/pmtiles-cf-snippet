@@ -407,7 +407,7 @@ Every tile must draw.
 python3 shard-pmtiles.py --selftest   # section planning and byte reconstruction
 node snippet-test.js                  # the snippet against a real split, 20 checks
 node minify-test.js                   # the minifier, 19 checks
-node deploy-test.js                   # the deploy requests, against a mock API, 13 checks
+node deploy-test.js                   # the deploy requests, against a mock API, 16 checks
 ```
 
 `snippet-test.js` splits a small synthetic archive with the real tool, then
@@ -454,9 +454,15 @@ Running wrangler in the build step as well would upload the asset set twice.
 The `name` in `wrangler.jsonc` must match the Worker name in the dashboard, or
 the build fails. It is `pmtiles-cf-snippet`.
 
-The API token needs Workers Scripts Edit for the assets and Snippets Edit for
-the snippet. See the header of `build.mjs` for the full list of environment
-variables.
+Only one secret is required, `CLOUDFLARE_API_TOKEN`, with Workers Scripts Edit
+for the assets and Snippets Edit for the snippet. Set `SNIPPET_HOST` to
+`tiles.jasontally.com`. The build looks the zone up through the API, so
+`CLOUDFLARE_ZONE_ID` is optional. See the header of `build.mjs` for the full
+list of environment variables.
+
+`node build.mjs doctor` reports which variables are set, verifies the token,
+resolves the zone, and counts the existing snippet rules. It never deploys. Use
+it to check a setup without waiting for a build.
 
 ### 14.1 Preview branches
 

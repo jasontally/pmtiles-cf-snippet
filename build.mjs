@@ -11,16 +11,29 @@
  *             This is the Workers Builds "deploy command".
  *   snippet   upload the snippet only. Use this when the deploy command stays
  *             "npx wrangler deploy" and the snippet goes in the build step.
+ *   doctor    report the build settings and what the token can reach. Changes
+ *             nothing. Use it to check a setup without waiting for a build.
  *   all       prepare then deploy. For running on one machine.
  *
  * In prepare: set ARCHIVE_PATH to an existing .pmtiles file, or set ARCHIVE_URL
  * and the script downloads it. With neither, the split is skipped, because the
  * repository holds no archive and 118 GiB cannot be committed.
  *
- * In deploy, CLOUDFLARE_API_TOKEN needs Workers Scripts Edit for the assets and
- * Snippets Edit for the snippet.
+ * In deploy, the only required variable is CLOUDFLARE_API_TOKEN. It needs
+ * Workers Scripts Edit for the assets and Snippets Edit for the snippet. The
+ * zone is found from SNIPPET_HOST when CLOUDFLARE_ZONE_ID is not set, so a build
+ * needs one secret, not three.
+ *
+ * Required environment for the snippet step:
+ *   CLOUDFLARE_API_TOKEN   Workers Scripts Edit, Snippets Edit
  *
  * Optional environment:
+ *   CLOUDFLARE_ZONE_ID     set to skip the zone lookup
+ *   CLOUDFLARE_ACCOUNT_ID  accepted for compatibility, not used
+ *   SNIPPET_HOST           host the rule matches (default: tiles.example.com).
+ *                          Also used to find the zone.
+ *   SNIPPET_RULE           full rule expression, overrides SNIPPET_HOST
+ *   SNIPPET_NAME           snippet name, a-z 0-9 and _ only (default: pmtiles)
  *   ARCHIVE_PATH           path to the .pmtiles file
  *   ARCHIVE_URL            download URL when ARCHIVE_PATH is not set
  *   ARCHIVE_NAME           archive name in URLs (default: file stem)
@@ -30,8 +43,6 @@
  *   SKIP_VERIFY            1 to skip the byte for byte check (default: 0)
  *   SKIP_ASSETS            1 to skip the asset upload (default: 0)
  *   SKIP_SNIPPET           1 to skip the snippet deploy (default: 0)
- *   SNIPPET_NAME           snippet name, a-z 0-9 and _ only (default: pmtiles)
- *   SNIPPET_RULE           rule expression (default matches /<name>.pmtiles)
  */
 
 import { spawnSync } from "node:child_process";
@@ -246,11 +257,65 @@ function deployAssets() {
   if (files > 100000) {
     fail(`${files} files exceeds the 100,000 file limit. Raise the part size.`);
   }
+  // wrangler reads its own credentials from CLOUDFLARE_API_TOKEN or its own
+  // config, so no account id is needed here. Only the snippet step needs one,
+  // and that resolves the zone from the host.
   requireEnv("CLOUDFLARE_API_TOKEN");
-  requireEnv("CLOUDFLARE_ACCOUNT_ID");
   // Cloudflare compares a content hash per file and skips unchanged ones, so a
   // build that changed a few parts uploads only those files.
   run("npx", ["--yes", "wrangler@latest", "deploy"], { quiet: false });
+}
+
+/**
+ * Report what the build can and cannot do, and why. Runs no deployment and
+ * changes nothing. Use it to check build settings without waiting for a build.
+ */
+async function doctor() {
+  const settings = [
+    ["CLOUDFLARE_API_TOKEN", "(secret)"],
+    ["CLOUDFLARE_ZONE_ID (optional)", "(secret)"],
+    ["CLOUDFLARE_ACCOUNT_ID (optional)", "(unused)"],
+    ["SNIPPET_HOST (optional)", "(plain)"],
+    ["SNIPPET_RULE (optional)", "(plain)"],
+    ["SNIPPET_NAME (optional)", "(plain)"],
+    ["ARCHIVE_PATH", "(plain)"],
+    ["ARCHIVE_URL", "(plain)"],
+  ];
+  console.log("build settings (values are not printed):");
+  for (const [key, kind] of settings) {
+    const present = Boolean(process.env[key.split(" ")[0]]);
+    console.log(`  ${present ? "set  " : "unset"}  ${key} ${kind}`);
+  }
+  for (const key of ["SNIPPET_HOST", "SNIPPET_RULE", "ARCHIVE_URL"]) {
+    if (process.env[key]) console.log(`  ${key} = ${process.env[key]}`);
+  }
+
+  const token = process.env.CLOUDFLARE_API_TOKEN;
+  if (!token) {
+    console.log("\nCLOUDFLARE_API_TOKEN is unset, so no API call can be made.");
+    console.log("Add it as a build secret with Workers Scripts Edit and Snippets Edit.");
+    return;
+  }
+
+  try {
+    const verified = await apiCall("/user/tokens/verify");
+    console.log(`\ntoken status: ${verified.result?.status || "unknown"}`);
+  } catch (error) {
+    console.log(`\ntoken check failed: ${error.message}`);
+    return;
+  }
+
+  try {
+    const zone = await resolveZone();
+    console.log(`zone: ${zone.name || "(id only)"} = ${zone.id}`);
+    const rules = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`);
+    console.log(`existing snippet rules: ${(rules.result?.rules || []).length}`);
+    const named = env("SNIPPET_NAME", "pmtiles");
+    const has = (rules.result?.rules || []).some((r) => r.snippet_name === named);
+    console.log(`snippet ${named}: ${has ? "has a rule" : "has no rule"}`);
+  } catch (error) {
+    console.log(`zone check failed: ${error.message}`);
+  }
 }
 
 /* ---------------------------------------------------------------- *
@@ -380,12 +445,67 @@ async function apiCall(path, options = {}) {
   return payload;
 }
 
+/**
+ * Resolve the zone.
+ *
+ * CLOUDFLARE_ZONE_ID is optional. When it is absent the token looks the zone
+ * up by name, which is derived from SNIPPET_HOST. So a build needs only
+ * CLOUDFLARE_API_TOKEN and SNIPPET_HOST, not a zone id.
+ */
+async function resolveZone() {
+  const explicit = env("CLOUDFLARE_ZONE_ID", "");
+  if (explicit) return { id: explicit, name: env("CLOUDFLARE_ZONE_NAME", "") };
+
+  const host = env("SNIPPET_HOST", "");
+  if (!host) {
+    fail("set CLOUDFLARE_ZONE_ID, or set SNIPPET_HOST so the zone can be found by name");
+  }
+  for (const candidate of zoneCandidates(host)) {
+    const found = await apiCall(
+      `/zones?name=${encodeURIComponent(candidate)}&per_page=5`
+    );
+    const zones = found.result || [];
+    if (zones.length === 1) {
+      console.log(`zone ${zones[0].name} = ${zones[0].id} (found from ${candidate})`);
+      return {
+        id: zones[0].id,
+        name: zones[0].name,
+        accountId: zones[0].account?.id || "",
+      };
+    }
+    if (zones.length > 1) {
+      fail(`the token can see ${zones.length} zones named ${candidate}, so the zone is ambiguous`);
+    }
+  }
+  fail(
+    `the token cannot see a zone for SNIPPET_HOST ${host}. ` +
+    `Tried: ${zoneCandidates(host).join(", ")}. ` +
+    `Give the token Zone Resources Include permission for the zone, or set CLOUDFLARE_ZONE_ID.`
+  );
+}
+
+/** A host and the parent domains, so tiles.example.com finds example.com. */
+function zoneCandidates(host) {
+  const out = [host];
+  const labels = host.split(".");
+  for (let i = 1; i < labels.length - 1; i++) out.push(labels.slice(i).join("."));
+  return [...new Set(out.filter(Boolean))];
+}
+
+/** The rule expression. SNIPPET_RULE overrides it. */
+function snippetRule() {
+  const override = env("SNIPPET_RULE", "");
+  if (override) return override;
+  const host = env("SNIPPET_HOST", "tiles.example.com");
+  return `(http.host eq "${host}" and http.request.uri.path matches "^/[^/]+\\.pmtiles$")`;
+}
+
 async function deploySnippet() {
   if (flag("SKIP_SNIPPET", "0")) {
     console.log("SKIP_SNIPPET=1, skipping");
     return;
   }
-  const zone = requireEnv("CLOUDFLARE_ZONE_ID");
+  const zone = await resolveZone();
   const name = env("SNIPPET_NAME", "pmtiles");
   if (!/^[a-z0-9_]+$/.test(name)) {
     fail(`SNIPPET_NAME ${name} must use only a-z, 0-9 and _`);
@@ -401,20 +521,17 @@ async function deploySnippet() {
   form.append("files", new Blob([small], { type: "application/javascript" }), "main.js");
   form.append("metadata", JSON.stringify({ main_module: "main.js" }));
 
-  const upload = await apiCall(`/zones/${zone}/snippets/${name}`, {
+  const upload = await apiCall(`/zones/${zone.id}/snippets/${name}`, {
     method: "PUT",
     body: form,
   });
   console.log(`snippet ${name} uploaded (${upload.result?.snippet_name || name})`);
 
-  const expression = env(
-    "SNIPPET_RULE",
-    `(http.host eq "tiles.example.com" and http.request.uri.path matches "^/[^/]+\\.pmtiles$")`
-  );
+  const expression = snippetRule();
 
   // The rules endpoint replaces the whole set, so read the current rules first
   // and send them all back with ours replaced or appended.
-  const existing = await apiCall(`/zones/${zone}/snippets/snippet_rules`);
+  const existing = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`);
   const current = existing.result?.rules || [];
   const kept = current.filter((rule) => rule.snippet_name !== name);
   const rules = [...kept, {
@@ -424,7 +541,7 @@ async function deploySnippet() {
     snippet_name: name,
   }];
 
-  const applied = await apiCall(`/zones/${zone}/snippets/snippet_rules`, {
+  const applied = await apiCall(`/zones/${zone.id}/snippets/snippet_rules`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ rules }),
@@ -470,6 +587,13 @@ async function prepare() {
   const out = join(DIST_DIR, "snippet.min.js");
   writeFileSync(out, small);
   console.log(`wrote ${out} (${Buffer.byteLength(small)} bytes)`);
+  // The deploy step needs the token, so report early rather than after the
+  // whole split. Without this the build fails only at the last step.
+  if (!process.env.CLOUDFLARE_API_TOKEN) {
+    console.log(
+      "warning: CLOUDFLARE_API_TOKEN is unset, so the deploy step cannot upload."
+    );
+  }
   return haveAssets;
 }
 
@@ -526,6 +650,10 @@ async function main(mode) {
     // snippet upload happens in the build step instead.
     step("deploy the snippet");
     await deploySnippet();
+  } else if (mode === "doctor") {
+    // Reports build settings and what the token can reach. Changes nothing.
+    step("check build settings");
+    await doctor();
   } else {
     // "all", for running everything on one machine.
     await prepare();

@@ -120,16 +120,31 @@ build fails. It is `pmtiles-cf-snippet`.
 directory is missing, and the directory would be missing on every build until an
 archive is uploaded. The 65,259 part files stay out of the repository.
 
-Secrets to set as build secrets:
+### Build settings
 
-| Secret | Needed for |
-|---|---|
-| `CLOUDFLARE_API_TOKEN` | Both steps. Needs Workers Scripts Edit and Snippets Edit |
-| `CLOUDFLARE_ACCOUNT_ID` | Asset upload |
-| `CLOUDFLARE_ZONE_ID` | Asset upload and snippet |
+One secret is enough:
 
-Set the zone in `SNIPPET_RULE`, which defaults to matching `tiles.example.com`.
-See the header of `build.mjs` for every variable.
+| Setting | Kind | Value |
+|---|---|---|
+| `CLOUDFLARE_API_TOKEN` | Secret | Needs Workers Scripts Edit and Snippets Edit |
+| `SNIPPET_HOST` | Variable | `tiles.jasontally.com` |
+
+`SNIPPET_HOST` sets the rule and finds the zone. The build looks the zone up
+through the API, so `CLOUDFLARE_ZONE_ID` is optional. `CLOUDFLARE_ACCOUNT_ID` is
+accepted for compatibility and is not used, because wrangler reads its own
+credentials.
+
+Set `SNIPPET_RULE` instead of `SNIPPET_HOST` only when the rule must differ from
+a host match plus a `.pmtiles` path.
+
+Check the setup without waiting for a build:
+
+```sh
+CLOUDFLARE_API_TOKEN=... SNIPPET_HOST=tiles.jasontally.com npm run doctor
+```
+
+It reports which variables are set, verifies the token, resolves the zone, and
+counts the existing snippet rules. It never deploys.
 
 To upload the asset parts, set `ARCHIVE_URL` to the `.pmtiles` URL or
 `ARCHIVE_PATH` to a file on the build machine. Without either, the build skips

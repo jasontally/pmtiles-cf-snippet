@@ -12,6 +12,7 @@
     "test:deploy": "node deploy-test.js",
     "build": "node build.mjs prepare",
     "build:snippet": "node build.mjs snippet",
+    "doctor": "node build.mjs doctor",
     "deploy": "node build.mjs deploy",
     "deploy:assets-only": "npx wrangler deploy",
     "deploy:all": "node build.mjs all",
