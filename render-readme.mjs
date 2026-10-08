@@ -24,27 +24,24 @@ Read the design and the arithmetic in
 
 ## Deploy
 
-\`wrangler.jsonc\` names the Worker \`${worker}\`, which must match the Worker in
-the Cloudflare dashboard.
+This repo is already wired to the Worker \`${worker}\` in Workers Builds. The
+build variables and the build and deploy commands are set through the API by
+\`wire-shards.mjs\` in pmtiles-cf-snippet. Nothing needs doing by hand.
 
-Set these as build variables in the Cloudflare dashboard:
-
-| Variable | Value |
-|---|---|
-| \`ARCHIVE_URL\` | the .pmtiles URL. It must support HTTP Range |
-| \`SHARD_INDEX\` | \`${index}\` |
-| \`SHARD_COUNT\` | \`13\` |
-
-Set these commands under **Settings > Build**:
+For reference, the settings are:
 
 | Setting | Value |
 |---|---|
+| \`ARCHIVE_URL\` | the dated .pmtiles URL. It must support HTTP Range |
+| \`SHARD_INDEX\` | \`${index}\` |
+| \`SHARD_COUNT\` | \`13\` |
 | Build command | \`npm run build\` |
 | Deploy command | \`npx wrangler deploy\` |
 
-The build command downloads only this shard's bytes and writes them to
-\`public/\`. The deploy command uploads them with wrangler, which skips any part
-whose content hash Cloudflare already holds.
+A push to \`main\` starts a build. The build command downloads only this shard's
+bytes and writes them to \`public/\`. The deploy command uploads them with
+wrangler, which skips any part whose content hash Cloudflare already holds, so a
+rebuild uploads almost nothing.
 
 ## Check the plan without downloading
 
@@ -52,8 +49,8 @@ whose content hash Cloudflare already holds.
 npm run dry-run
 \`\`\`
 
-Prints the part count, the byte range, and the first three parts. Downloads
-nothing.
+Prints the part count, the byte ranges it will fetch, and the first three parts.
+Downloads 16 KB, no more.
 `;
 }
 

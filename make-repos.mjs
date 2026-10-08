@@ -241,7 +241,7 @@ function main() {
     for (const message of failed) console.log(`  ${message}`);
     process.exit(1);
   }
-  console.log(`\nNext: in the Cloudflare dashboard, connect each ${repoName(0)}..${repoName(12)}`);
+  console.log(`\nNext: node wire-shards.mjs  to bind each ${repoName(0)}..${repoName(12)}`);
   console.log("to its Worker and set ARCHIVE_URL, SHARD_INDEX, and SHARD_COUNT.");
 }
 
