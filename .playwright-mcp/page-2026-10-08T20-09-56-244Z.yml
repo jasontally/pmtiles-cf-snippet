@@ -1,0 +1,129 @@
+- generic [ref=f1e2]:
+  - banner [ref=f1e3]:
+    - heading "Protomaps Basemap tiles" [level=1] [ref=f1e4]
+    - paragraph [ref=f1e5]: The whole Protomaps Basemap, zoom 0 to 15, served as one PMTiles archive over plain HTTP. Point any PMTiles client at the URL and it works. There is no API key, no account, and no rate limit.
+    - code [ref=f1e6]: https://tiles.jasontally.com/basemap.pmtiles
+    - list [ref=f1e7]:
+      - listitem [ref=f1e8]:
+        - generic [ref=f1e9]: No API key
+        - text: Nothing to sign up for, no token in your code.
+      - listitem [ref=f1e10]:
+        - generic [ref=f1e11]: No rate limit
+        - text: No throttling, no quota, no burst cap.
+      - listitem [ref=f1e12]:
+        - generic [ref=f1e13]: No SLA
+        - text: Best effort only. See what that means below.
+      - listitem [ref=f1e14]:
+        - generic [ref=f1e15]: Zoom 0 to 15
+        - text: Vector tiles, gzip, 118 GiB of archive.
+  - generic [ref=f1e16]:
+    - heading "Try it" [level=2] [ref=f1e17]
+    - paragraph [ref=f1e18]: The same archive in three styles. Switching style keeps the tiles already loaded, so it is instant.
+    - generic [ref=f1e19]:
+      - group "Style"
+      - generic [ref=f1e20]:
+        - button "Style JSON" [ref=f1e21] [cursor=pointer]
+        - button "Archive metadata" [ref=f1e22] [cursor=pointer]
+      - generic [ref=f1e23]: loading tiles…
+  - generic [ref=f1e24]:
+    - heading "Use it" [level=2] [ref=f1e25]
+    - paragraph [ref=f1e26]: The archive speaks HTTP range requests, so every PMTiles client can read it.
+    - heading "One. Put a map on the page" [level=3] [ref=f1e27]
+    - paragraph [ref=f1e28]: "Copy this file. It is the whole example: two script tags, one style URL, one map."
+    - code [ref=f1e30]: "<!doctype html> <html> <head> <meta charset=\"utf-8\"> <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"> <title>Basemap</title> <link rel=\"stylesheet\" href=\"https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css\"> <script src=\"https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js\"></script> <script src=\"https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js\"></script> <style>html, body, #map { margin: 0; height: 100%; }</style> </head> <body> <div id=\"map\"></div> <script> // Teach MapLibre how to read a PMTiles archive. const protocol = new pmtiles.Protocol(); maplibregl.addProtocol(\"pmtiles\", protocol.tile); new maplibregl.Map({ container: \"map\", style: \"https://tiles.jasontally.com/styles/light.json\", center: [2.35, 48.85], // Paris zoom: 4 }); </script> </body> </html>"
+    - heading "Two. Swap the tiles in a style you already have" [level=3] [ref=f1e31]
+    - paragraph [ref=f1e32]:
+      - text: Every MapLibre style reads its tiles from a source. To use these tiles, change that one
+      - code [ref=f1e33]: url
+      - text: . Nothing else in the style changes.
+    - code [ref=f1e35]: "\"sources\": { \"protomaps\": { \"type\": \"vector\", - \"url\": \"pmtiles://https://demo-bucket.protomaps.com/v4.pmtiles\", + \"url\": \"pmtiles://https://tiles.jasontally.com/basemap.pmtiles\", \"attribution\": \"<a href=\\\"https://www.openstreetmap.org/copyright\\\">&copy; OpenStreetMap contributors</a>\" } }"
+    - paragraph [ref=f1e36]: "Or do it in code, which is useful if the style comes from a server you do not control:"
+    - code [ref=f1e38]: "// Rewrite every PMTiles source in a style to point at these tiles. const style = await (await fetch(\"https://your-server/style.json\")).json(); for (const source of Object.values(style.sources)) { if (source.url?.startsWith(\"pmtiles://\")) { source.url = \"pmtiles://https://tiles.jasontally.com/basemap.pmtiles\"; } } new maplibregl.Map({ container: \"map\", style, center: [2.35, 48.85], zoom: 4 });"
+    - paragraph [ref=f1e39]:
+      - strong [ref=f1e40]: One thing to check before you swap.
+      - text: This archive is
+      - strong [ref=f1e41]: Protomaps schema v3
+      - text: . A style written for a different schema will load and then draw nothing, because the source layer names do not match. The nine layer names are listed below, and so is a ready-made v3 style you can copy from.
+    - heading "Three. About Leaflet" [level=3] [ref=f1e42]
+    - paragraph [ref=f1e43]:
+      - text: These are
+      - strong [ref=f1e44]: vector
+      - text: tiles. Leaflet draws raster tiles, and the PMTiles library will refuse this archive in Leaflet with
+      - code [ref=f1e45]: archive contains MVT vector tiles, but leafletRasterLayer is for displaying raster tiles
+      - text: . That is the library being correct, not a bug. Use MapLibre GL as above. If you need Leaflet or a raster image pipeline, you need a raster-rendered archive, which this is not.
+    - heading "Four. Read the archive with the PMTiles library" [level=3] [ref=f1e46]
+    - paragraph [ref=f1e47]: No map, just data. Useful for scripts, tests and anything that is not a picture.
+    - code [ref=f1e49]: "import { PMTiles, FetchSource } from \"pmtiles\"; const archive = new PMTiles(new FetchSource(\"https://tiles.jasontally.com/basemap.pmtiles\")); const header = await archive.getHeader(); console.log(header.minZoom, header.maxZoom); // 0 15 console.log(header.numAddressedTiles); // 1431655765 const metadata = await archive.getMetadata(); console.log(metadata.name); // \"Protomaps Basemap\" const tile = await archive.getZxy(3, 4, 2); // z, x, y console.log(tile.data.byteLength);"
+    - paragraph [ref=f1e50]:
+      - text: Note the two classes.
+      - code [ref=f1e51]: FetchSource
+      - text: is the byte reader over HTTP, and
+      - code [ref=f1e52]: PMTiles
+      - text: is the reader that sits on top of it and understands the format.
+      - code [ref=f1e53]: FileSource
+      - text: is the local-file equivalent of
+      - code [ref=f1e54]: FetchSource
+      - text: ; given a URL string it will not work.
+    - paragraph [ref=f1e55]: The archive is a fixed snapshot and is not being refreshed. If you need current OpenStreetMap data, use a source that publishes updates.
+  - generic [ref=f1e56]:
+    - heading "Styles" [level=2] [ref=f1e57]
+    - paragraph [ref=f1e58]: Same tiles, different colours. Pick one, copy it, change it, it is yours.
+    - table [ref=f1e60]:
+      - rowgroup [ref=f1e61]:
+        - row [ref=f1e62]:
+          - columnheader "Style" [ref=f1e63]
+          - columnheader "Looks like" [ref=f1e64]
+          - columnheader "File" [ref=f1e65]
+      - rowgroup
+  - generic [ref=f1e66]:
+    - heading "Make your own" [level=2] [ref=f1e67]
+    - paragraph [ref=f1e68]: Change a colour or switch a layer off and the map updates. Then copy the style JSON, which is a normal MapLibre style you can host yourself. It points at these tiles, so it keeps working wherever you put it.
+    - generic [ref=f1e69]:
+      - generic [ref=f1e70]:
+        - generic [ref=f1e71]: Start from
+        - generic [ref=f1e73]: Layers
+        - generic [ref=f1e75]:
+          - button "Copy style JSON" [ref=f1e76] [cursor=pointer]
+          - button "Download" [ref=f1e77] [cursor=pointer]
+          - button "Copy share link" [ref=f1e78] [cursor=pointer]
+          - button "Reset" [ref=f1e79] [cursor=pointer]
+      - group [ref=f1e81]:
+        - generic "Style JSON" [ref=f1e82] [cursor=pointer]
+  - generic [ref=f1e83]:
+    - heading "What is in the tiles" [level=2] [ref=f1e84]
+    - paragraph [ref=f1e85]: Read from the archive's own metadata at page load. These are the layer names a style must use.
+    - table [ref=f1e87]:
+      - rowgroup [ref=f1e88]:
+        - row [ref=f1e89]:
+          - columnheader "Source layer" [ref=f1e90]
+          - columnheader "Zoom" [ref=f1e91]
+          - columnheader "Fields" [ref=f1e92]
+      - rowgroup [ref=f1e93]:
+        - row [ref=f1e94]:
+          - cell "loading…" [ref=f1e95]
+  - generic [ref=f1e96]:
+    - heading "What this is not" [level=2] [ref=f1e97]
+    - paragraph [ref=f1e98]: Plain answers, so nothing here surprises you later.
+    - list [ref=f1e99]:
+      - listitem [ref=f1e100]:
+        - strong [ref=f1e101]: There is no service level guarantee.
+        - text: This is a free service with no contract behind it. It can be slow, it can go down, and the URL and the data can change or disappear without notice. If your product depends on it, host your own copy of the tiles or buy a supported plan from someone.
+      - listitem [ref=f1e102]:
+        - strong [ref=f1e103]: The data is not being refreshed.
+        - text: The archive is a snapshot of the Protomaps Basemap. New OpenStreetMap edits do not appear in it.
+      - listitem [ref=f1e104]:
+        - strong [ref=f1e105]: No whole-file download.
+        - text: Requests are answered in ranges of at most 512 KiB, which is all a PMTiles client ever asks for. Asking for the whole 118 GiB in one request returns
+        - code [ref=f1e106]: "416"
+        - text: ", which is correct."
+      - listitem [ref=f1e107]:
+        - strong [ref=f1e108]: Attribution is required.
+        - text: The tiles are derived from OpenStreetMap. Keep the attribution line in your style or on your map.
+  - contentinfo [ref=f1e109]:
+    - text: "Tiles:"
+    - link "Protomaps Basemap" [ref=f1e110] [cursor=pointer]:
+      - /url: https://github.com/protomaps/basemaps
+    - text: ", derived from"
+    - link "OpenStreetMap" [ref=f1e111] [cursor=pointer]:
+      - /url: https://www.openstreetmap.org/copyright
+    - text: contributors. PMTiles archive served from tiles.jasontally.com.

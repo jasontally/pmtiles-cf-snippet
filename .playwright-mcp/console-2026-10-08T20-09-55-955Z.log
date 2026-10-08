@@ -1,0 +1,15 @@
+[     397ms] [ERROR] TypeError: Cannot read properties of null (reading 'name')
+    at currentStyle (https://tiles.jasontally.com/:520:33)
+    at apply (https://tiles.jasontally.com/:525:19)
+    at loadBuilder (https://tiles.jasontally.com/:494:5)
+    at async boot (https://tiles.jasontally.com/:451:5) @ https://tiles.jasontally.com/:758
+[    6630ms] TypeError: Cannot set properties of null (setting 'water')
+    at HTMLInputElement.<anonymous> (https://tiles.jasontally.com/:596:31)
+    at eval (eval at <anonymous> (eval at evaluate (:368:30)), <anonymous>:11:11)
+    at async eval (eval at evaluate (:368:30), <anonymous>:4:30)
+    at async <anonymous>:394:30
+[    6931ms] TypeError: Cannot set properties of null (setting 'roads')
+    at HTMLButtonElement.<anonymous> (https://tiles.jasontally.com/:570:38)
+    at eval (eval at <anonymous> (eval at evaluate (:368:30)), <anonymous>:17:11)
+    at async eval (eval at evaluate (:368:30), <anonymous>:4:30)
+    at async <anonymous>:394:30

@@ -490,6 +490,10 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   async function loadBuilder() {
     builder.data = await (await fetch("styles/builder.json")).json();
     buildBuilderUi();
+    // A flavour must be chosen before anything reads the palette. The colour
+    // inputs are built first because setFlavorPalette fills them, and the shared
+    // link is applied on top of that default.
+    setFlavorPalette(flavors[0].id);
     applyHash();
     apply();
   }
@@ -503,6 +507,8 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     }
     for (const input of document.querySelectorAll("#builder-colors input")) {
       input.value = builder.values[input.dataset.key];
+      const hex = input.parentElement.querySelector("code");
+      if (hex) hex.textContent = input.value;
     }
   }
 
@@ -517,7 +523,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   /** Render the current edits and hand the map the result. */
   function currentStyle() {
     const values = { ...builder.values, flavor: builder.baseId };
-    const name = builder.values.name;
     return renderTemplate(builder.data.template, values, builder.show);
   }
 
