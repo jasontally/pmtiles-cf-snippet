@@ -17,8 +17,11 @@
  * data. Everything else is styling.
  */
 
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
+
+// The renderer is shared with the browser, so the page and the build agree.
+export { renderTemplate, hasUnfilled, packEdits, unpackEdits } from "./render-template.mjs";
 import { fileURLToPath } from "node:url";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
@@ -77,14 +80,74 @@ const NAME = ["coalesce", ["get", "name:en"], ["get", "name"]];
 /** Show a feature when its own min_zoom says the map is zoomed in far enough. */
 const shownAt = (zoom) => ["<=", ["get", "min_zoom"], zoom];
 
+// One id and its casing per road class. A stray id here names a layer that
+// does not exist, and the toggle that covers it silently does nothing.
+const PLACE_IDS = ROADS.flatMap(([id]) => [id, `${id}-casing`]);
+const PLACE_LAYER_IDS = [
+  "country", "region", "locality", "macrohood", "neighbourhood", "settlement",
+].map((kind) => `place-${kind}`);
+
+/**
+ * The toggles the documentation page offers, and the layers each one covers.
+ *
+ * `layers` must name real layer ids. The test suite checks that, because a typo
+ * here is a toggle that silently does nothing.
+ */
+export const TOGGLE_GROUPS = [
+  { id: "landcover", label: "Land cover", layers: ["landcover"] },
+  { id: "landuse", label: "Land use", layers: ["landuse"] },
+  { id: "water", label: "Water", layers: ["water", "water-line"] },
+  { id: "boundaries", label: "Boundaries", layers: ["boundary-region", "boundary-country"] },
+  { id: "roads", label: "Roads", layers: PLACE_IDS },
+  { id: "buildings", label: "Buildings", layers: ["buildings"] },
+  { id: "labels", label: "Place labels", layers: [...PLACE_LAYER_IDS, "poi"] },
+];
+
+/**
+ * The palette keys the page exposes as colour inputs, grouped for the form.
+ *
+ * Only keys that reach a visible layer are listed. A key that no layer reads
+ * would give the user a control that changes nothing.
+ */
+export const CONTROLS = [
+  { group: "Background", keys: ["background", "earth"] },
+  { group: "Land", keys: ["forest", "grass", "farmland", "park", "sand", "rock", "ice"] },
+  { group: "Water", keys: ["water"] },
+  { group: "Roads", keys: ["road", "roadMajor", "roadCasing"] },
+  { group: "Boundaries and labels", keys: ["boundary", "label", "halo", "poiLabel"] },
+  { group: "Buildings", keys: ["building", "buildingOutline"] },
+];
+
+/** Every colour key the page may edit, from CONTROLS. */
+export const CONTROL_KEYS = [...new Set(CONTROLS.flatMap((group) => group.keys))];
+
+/**
+ * A palette whose every value is a `{{key}}` placeholder.
+ *
+ * `swatch` never reaches a style, so it is left out: a placeholder the renderer
+ * would fail to fill is worse than no placeholder.
+ */
+export function placeholderPalette() {
+  const out = {};
+  for (const key of Object.keys(FLAVORS.light)) {
+    if (key === "swatch") continue;
+    out[key] = `{{${key}}}`;
+  }
+  return out;
+}
+
 /**
  * Build the style for one flavour.
  *
- * Colours come from `p`. Everything else is shared, so a flavour cannot drift
- * away from the others in structure.
+ * Colours come from `palette`. Everything else is shared, so a flavour cannot
+ * drift away from the others in structure.
+ *
+ * Passing a palette of `{{key}}` placeholders instead of colours gives the
+ * template the browser side builder edits. One code path, so the template can
+ * never describe a different map from the styles that ship.
  */
-export function buildStyle(flavor) {
-  const p = FLAVORS[flavor];
+export function buildStyle(flavor, palette = FLAVORS[flavor]) {
+  const p = palette;
   const layers = [];
 
   layers.push({ id: "background", type: "background", paint: { "background-color": p.background } });
@@ -316,9 +379,17 @@ export function buildStyle(flavor) {
     paint: { "text-color": p.poiLabel, "text-halo-color": p.halo, "text-halo-width": 1.2 },
   });
 
+  // A page toggle has to set `visibility` on every layer in the group, because
+  // visibility does not cascade. The groups are named here once and expanded, so
+  // the page and the styles cannot disagree about what a toggle covers.
+  for (const layer of layers) {
+    const group = TOGGLE_GROUPS.find((g) => g.layers.includes(layer.id));
+    if (group) layer.visibility = `{{show:${group.id}}}`;
+  }
+
   return {
     version: 8,
-    name: `Protomaps Basemap — ${flavor}`,
+    name: `Protomaps Basemap — ${p.name}`,
     metadata: {
       "jasontally:tiles": TILES_URL,
       "jasontally:flavor": flavor,
@@ -453,6 +524,98 @@ export const FLAVORS = {
   },
 };
 
+/** Byte size of a style file, without needing it written first. */
+function styleBytes(id) {
+  return Buffer.byteLength(`${JSON.stringify(buildStyle(id), null, 2)}\n`);
+}
+
+/** The /styles/ listing. One self contained page, no build step for the reader. */
+function stylesIndexPage(palettes) {
+  const rows = Object.entries(palettes)
+    .map(
+      ([id, p]) =>
+        `      <tr><td><a href="${id}.json">${id}.json</a></td>` +
+        `<td><span class="swatch" style="background:${p.swatch}"></span> ${p.name}</td>` +
+        `<td class="mono">${styleBytes(id).toLocaleString()}</td></tr>`
+    )
+    .join("\n");
+
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>MapLibre styles — tiles.jasontally.com</title>
+<meta name="description" content="MapLibre GL styles for the Protomaps Basemap tiles at tiles.jasontally.com.">
+<style>
+  :root { --bg:#fbfaf7; --panel:#fff; --ink:#24231f; --muted:#6d6a61; --line:#e2ded4; --accent:#1d6f5c; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#1b1d1f; --panel:#232629; --ink:#e6e4de; --muted:#a09c93; --line:#34383b; --accent:#63c9a8; } }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  .wrap { max-width:44rem; margin:0 auto; padding:3rem 1.25rem 4rem; }
+  h1 { font-size:1.8rem; margin:0 0 .4rem; letter-spacing:-.02em; }
+  p.lede { color:var(--muted); margin:0 0 1.5rem; }
+  table { border-collapse:collapse; width:100%; font-size:.92rem; }
+  th, td { text-align:left; padding:.5rem .6rem; border-bottom:1px solid var(--line); }
+  th { font-size:.76rem; text-transform:uppercase; letter-spacing:.04em; color:var(--muted); }
+  a { color:var(--accent); }
+  code, .mono { font-family:ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .swatch { display:inline-block; width:.8rem; height:.8rem; border-radius:3px; border:1px solid rgba(0,0,0,.2); vertical-align:-1px; }
+  ul { padding-left:1.1rem; }
+  li { margin:.25rem 0; }
+  footer { margin-top:2.5rem; padding-top:1.2rem; border-top:1px solid var(--line); color:var(--muted); font-size:.88rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>MapLibre styles</h1>
+  <p class="lede">
+    Complete MapLibre GL styles for the Protomaps Basemap tiles served from
+    <code>https://tiles.jasontally.com/basemap.pmtiles</code>. No API key, no rate
+    limit, no service level guarantee.
+  </p>
+
+  <h2>Use one</h2>
+<pre class="mono" style="background:#f3f1ea;border:1px solid #e2ded4;border-radius:8px;padding:1rem;overflow-x:auto;font-size:.82rem">new maplibregl.Map({
+  container: "map",
+  style: "https://tiles.jasontally.com/styles/light.json"
+});</pre>
+  <p>
+    Register the PMTiles protocol first. The
+    <a href="/">documentation page</a> has the complete example.
+  </p>
+
+  <h2>The styles</h2>
+  <table>
+    <thead><tr><th>File</th><th>Flavour</th><th>Size</th></tr></thead>
+    <tbody>
+${rows}
+    </tbody>
+  </table>
+  <p>
+    Also here: <a href="index.json">index.json</a> lists them for scripts, and
+    <a href="builder.json">builder.json</a> carries the template and every palette
+    that the style builder on the <a href="/">documentation page</a> edits.
+  </p>
+
+  <h2>Make your own</h2>
+  <p>
+    A flavour is only colours over one set of tiles, so there is nothing here that
+    cannot be changed. Set any colour, switch layers off, and copy the resulting
+    style from the builder. The style you get back is a normal MapLibre style, so
+    you can host it yourself.
+  </p>
+
+  <footer>
+    Tiles derived from
+    <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
+  </footer>
+</div>
+</body>
+</html>
+`;
+}
+
 function main() {
   mkdirSync(OUT, { recursive: true });
 
@@ -477,6 +640,41 @@ function main() {
   }
   writeFileSync(join(OUT, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
   console.log(`  index.json  ${Object.keys(FLAVORS).length} flavors`);
+
+  // The builder payload. One template, because the styles are structurally
+  // identical and only the colours differ, plus every palette so the page can
+  // switch flavour without another request.
+  // The flavour id is a placeholder too, so the builder labels a custom style
+  // with whatever the page is showing rather than a fixed word.
+  const template = buildStyle("{{flavor}}", placeholderPalette());
+  const builder = {
+    tiles: TILES_URL,
+    note:
+      "template plus palettes. The page fills {{key}} placeholders with colours and " +
+      "{{show:id}} with visible or none, so what it shows is exactly what you copy.",
+    template,
+    palettes: FLAVORS,
+    controls: CONTROLS,
+    controlKeys: CONTROL_KEYS,
+    toggles: TOGGLE_GROUPS.map(({ id, label }) => ({ id, label })),
+  };
+  const builderText = `${JSON.stringify(builder, null, 2)}\n`;
+  writeFileSync(join(OUT, "builder.json"), builderText);
+
+  // The page imports this module directly, so the builder fills placeholders with
+  // the same code the build used to prove the template matches the styles.
+  copyFileSync(join(ROOT, "web", "render-template.mjs"), join(OUT, "render-template.mjs"));
+
+  // /styles/ as a browsable page. Generated rather than hand written, so it
+  // cannot list a style that was renamed or removed. Workers Static Assets serve
+  // it: the Snippet only matches paths containing ".pmtiles", so nothing here
+  // reaches it.
+  writeFileSync(join(OUT, "index.html"), stylesIndexPage(FLAVORS));
+  console.log("  index.html  the /styles/ listing");
+  console.log(
+    `  builder.json  ${Buffer.byteLength(builderText).toLocaleString()} bytes, ` +
+      `${CONTROL_KEYS.length} colours, ${TOGGLE_GROUPS.length} toggles`
+  );
   console.log(`\nwrote ${OUT}`);
 }
 

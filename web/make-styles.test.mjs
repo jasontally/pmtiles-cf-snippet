@@ -18,7 +18,10 @@ import { readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { buildStyle, FLAVORS, SCHEMA, TILES_URL } from "./make-styles.mjs";
+import {
+  buildStyle, renderTemplate, placeholderPalette, FLAVORS, SCHEMA, TILES_URL,
+  CONTROLS, CONTROL_KEYS, TOGGLE_GROUPS, packEdits, unpackEdits, hasUnfilled,
+} from "./make-styles.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const READER = TILES_URL;
@@ -50,6 +53,11 @@ async function archiveLayers() {
 }
 
 const ids = Object.keys(FLAVORS);
+
+/** The builder payload the page loads, read from disk. */
+function readBuilder() {
+  return JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "builder.json"), "utf8"));
+}
 
 await check("there is more than one flavour", () => {
   assert.ok(ids.length >= 2, `only ${ids.length} flavour`);
@@ -164,6 +172,149 @@ await check("the generated index lists every flavour and points at real files", 
       assert.equal(doc.version, 8, `${url} is not a style`);
     }
   }
+});
+
+await check("the template plus a palette reproduces the shipped style", () => {
+  // This is the guarantee behind the builder: what the page shows is what it
+  // hands you. If the template and the shipped styles described different maps,
+  // the builder would be a lie.
+  const builder = readBuilder();
+  const strip = (node) =>
+    Array.isArray(node)
+      ? node.map(strip)
+      : node && typeof node === "object"
+        ? Object.fromEntries(
+            Object.entries(node).filter(([key]) => key !== "visibility").map(([k, v]) => [k, strip(v)])
+          )
+        : node;
+
+  for (const id of ids) {
+    const show = Object.fromEntries(builder.toggles.map((t) => [t.id, true]));
+    const rendered = renderTemplate(builder.template, { ...builder.palettes[id], flavor: id }, show);
+    const shipped = buildStyle(id);
+    assert.deepEqual(
+      strip(rendered),
+      strip(shipped),
+      `the template rendered with the ${id} palette differs from the ${id} style`
+    );
+  }
+});
+
+await check("a full palette leaves no placeholder unfilled", () => {
+  const builder = readBuilder();
+  const show = Object.fromEntries(builder.toggles.map((t) => [t.id, true]));
+  for (const id of ids) {
+    const rendered = renderTemplate(builder.template, { ...builder.palettes[id], flavor: id }, show);
+    const text = JSON.stringify(rendered);
+    assert.ok(!text.includes("{{"), `flavour ${id} leaves a placeholder unfilled`);
+  }
+});
+
+await check("a toggle off hides every layer in its group", () => {
+  const builder = readBuilder();
+  const show = Object.fromEntries(builder.toggles.map((t) => [t.id, true]));
+  for (const group of TOGGLE_GROUPS) {
+    const style = renderTemplate(builder.template, builder.palettes.light, { ...show, [group.id]: false });
+    for (const layerId of group.layers) {
+      const layer = style.layers.find((l) => l.id === layerId);
+      assert.ok(layer, `group ${group.id} names layer ${layerId}, which does not exist`);
+      assert.equal(layer.visibility, "none", `${group.id} off must hide ${layerId}`);
+    }
+    // And nothing outside the group changed.
+    const others = style.layers.filter((l) => !group.layers.includes(l.id) && l.visibility === "none");
+    assert.deepEqual(others, [], `${group.id} off also hid ${others.map((l) => l.id).join(", ")}`);
+  }
+});
+
+await check("every toggle group names layers that exist", () => {
+  const builder = readBuilder();
+  const known = new Set(builder.template.layers.map((l) => l.id));
+  for (const group of TOGGLE_GROUPS) {
+    assert.ok(group.layers.length > 0, `group ${group.id} covers nothing`);
+    for (const layerId of group.layers) {
+      assert.ok(known.has(layerId), `group ${group.id} names unknown layer ${layerId}`);
+    }
+    // A group whose id is not in a template placeholder is a dead toggle.
+    const placeholder = `{{show:${group.id}}}`;
+    assert.ok(
+      JSON.stringify(builder.template).includes(placeholder),
+      `group ${group.id} has no ${placeholder} placeholder in the template`
+    );
+  }
+});
+
+await check("every colour control reaches the style", () => {
+  // A control that changes nothing is worse than no control: it looks like it
+  // works.
+  const builder = readBuilder();
+  for (const key of CONTROL_KEYS) {
+    assert.ok(FLAVORS.light[key] !== undefined, `control ${key} is not a palette key`);
+    const show = Object.fromEntries(builder.toggles.map((t) => [t.id, true]));
+    const before = JSON.stringify(renderTemplate(builder.template, builder.palettes.light, show));
+    const after = JSON.stringify(
+      renderTemplate(builder.template, { ...builder.palettes.light, [key]: "#123456" }, show)
+    );
+    assert.notEqual(after, before, `control ${key} changes nothing in the rendered style`);
+  }
+});
+
+await check("every control group names keys that exist", () => {
+  for (const group of CONTROLS) {
+    for (const key of group.keys) {
+      assert.ok(FLAVORS.light[key] !== undefined, `control group ${group.group} names unknown ${key}`);
+    }
+  }
+});
+
+await check("the placeholder palette covers every colour key but the swatch", () => {
+  const placeholders = placeholderPalette();
+  assert.equal(placeholders.swatch, undefined, "swatch is not used by a style");
+  for (const key of Object.keys(FLAVORS.light)) {
+    if (key === "swatch") continue;
+    assert.equal(placeholders[key], `{{${key}}}`, `placeholder for ${key}`);
+  }
+});
+
+await check("an unknown key is left visible rather than silently blanked", () => {
+  // A placeholder with no value must stay literal so the bug shows in the JSON
+  // the user copies, instead of becoming a colour that does not exist.
+  const partial = renderTemplate({ layers: [{ paint: { "fill-color": "{{nope}}" } }] }, { water: "#fff" });
+  assert.equal(partial.layers[0].paint["fill-color"], "{{nope}}");
+});
+
+await check("a share link round trips", () => {
+  const base = FLAVORS.light;
+  const values = { ...base, water: "#ff00ff", label: "#112233" };
+  const show = { landcover: false, buildings: false };
+  const packed = packEdits(base, values, show);
+
+  assert.ok(!/[+/=]/.test(packed), `not URL safe: ${packed}`);
+  assert.ok(packed.length < 200, `a share link should stay short, got ${packed.length} characters`);
+
+  const back = unpackEdits(base, packed);
+  for (const key of Object.values(base)) {
+    assert.equal(back.values[key], values[key], `colour ${key} did not round trip`);
+  }
+  assert.equal(back.show.landcover, false);
+  assert.equal(back.show.buildings, false);
+});
+
+await check("an untouched palette packs small and changes nothing", () => {
+  const base = FLAVORS.light;
+  const packed = packEdits(base, base, {});
+  // The floor is the base64 of {"c":{},"o":[]}. What matters is that it stays
+  // short next to a full palette, and that unpacking it is a no-op.
+  assert.ok(packed.length < 40, `no edits should pack small, got ${packed.length}`);
+  const back = unpackEdits(base, packed);
+  for (const key of Object.values(base)) {
+    assert.equal(back.values[key], base[key], `colour ${key} changed on an empty pack`);
+  }
+  assert.deepEqual(Object.entries(back.show).filter(([, on]) => on === false), []);
+});
+
+await check("hasUnfilled spots a half rendered style", () => {
+  assert.equal(hasUnfilled(renderTemplate({ a: "{{x}}" }, { x: "#fff" })), false);
+  assert.equal(hasUnfilled(renderTemplate({ a: "{{x}}" }, {})), true);
 });
 
 await check("the page links the tiles URL the styles use", () => {

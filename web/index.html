@@ -83,6 +83,35 @@
   .maphint { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
     font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
 
+  /* builder */
+  .builder { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
+  @media (max-width: 52rem) { .builder { grid-template-columns: 1fr; } }
+  .builder-controls { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; }
+  .builder-row { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; padding: .4rem 0; }
+  .builder-label { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); min-width: 5.5rem; }
+  .builder-flavors, .builder-toggles { display: flex; gap: .3rem; flex-wrap: wrap; }
+  .builder-flavors button, .builder-toggles button, .builder-actions button {
+    font: inherit; font-size: .85rem; padding: .3rem .65rem; border-radius: 999px; cursor: pointer;
+    background: var(--code-bg); color: var(--ink); border: 1px solid var(--line);
+  }
+  .builder-toggles button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
+  .builder-color-group { margin-top: .9rem; }
+  .builder-color-group h4 { margin: 0 0 .45rem; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
+  .builder-colors-grid { display: grid; gap: .4rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
+  .builder-color { display: flex; align-items: center; gap: .45rem; font-size: .84rem; }
+  .builder-color input[type="color"] {
+    width: 1.9rem; height: 1.6rem; padding: 0; border: 1px solid var(--line);
+    border-radius: 4px; background: none; cursor: pointer;
+  }
+  .builder-color code { font-size: .76rem; color: var(--muted); }
+  .builder-actions { display: flex; gap: .4rem; flex-wrap: wrap; align-items: center; margin-top: 1.1rem; padding-top: .9rem; border-top: 1px solid var(--line); }
+  .builder-actions button:first-child { background: var(--accent); color: #fff; border-color: transparent; }
+  .builder-status { font-size: .82rem; color: var(--muted); }
+  .builder-side { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; }
+  .builder-note { font-size: .86rem; color: var(--muted); margin-bottom: .8rem; }
+  .builder-side summary { cursor: pointer; font-size: .88rem; }
+  .builder-side pre { max-height: 22rem; overflow: auto; font-size: .74rem; }
+
   /* json dialog */
   dialog {
     border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--panel); color: var(--ink);
@@ -256,6 +285,43 @@ console.log(tile.data.byteLength);</code></pre>
   </div>
 </section>
 
+<section id="builder">
+  <h2>Make your own</h2>
+  <p class="sub">
+    Change a colour or switch a layer off and the map updates. Then copy the style
+    JSON, which is a normal MapLibre style you can host yourself. It points at
+    these tiles, so it keeps working wherever you put it.
+  </p>
+
+  <div class="builder">
+    <div class="builder-controls">
+      <div class="builder-row">
+        <span class="builder-label">Start from</span>
+        <span id="builder-flavors" class="builder-flavors"></span>
+      </div>
+      <div class="builder-row">
+        <span class="builder-label">Layers</span>
+        <span id="builder-toggles" class="builder-toggles"></span>
+      </div>
+      <div id="builder-colors"></div>
+      <div class="builder-actions">
+        <button type="button" id="builder-copy">Copy style JSON</button>
+        <button type="button" id="builder-download">Download</button>
+        <button type="button" id="builder-share">Copy share link</button>
+        <button type="button" id="builder-reset">Reset</button>
+        <span id="builder-status" class="builder-status"></span>
+      </div>
+    </div>
+    <div class="builder-side">
+      <div class="builder-note" id="builder-note"></div>
+      <details>
+        <summary>Style JSON</summary>
+        <pre id="builder-json"></pre>
+      </details>
+    </div>
+  </div>
+</section>
+
 <section id="schema">
   <h2>What is in the tiles</h2>
   <p class="sub">Read from the archive's own metadata at page load. These are the layer names a style must use.</p>
@@ -312,7 +378,9 @@ console.log(tile.data.byteLength);</code></pre>
   <div class="dlg-body"><pre id="style-json"></pre></div>
 </dialog>
 
-<script>
+<script type="module">
+import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/render-template.mjs";
+
 (function () {
   "use strict";
   const TILES = "https://tiles.jasontally.com/basemap.pmtiles";
@@ -380,6 +448,7 @@ console.log(tile.data.byteLength);</code></pre>
     });
 
     loadSchema();
+    await loadBuilder();
   }
 
   function selectFlavor(flavor) {
@@ -388,10 +457,238 @@ console.log(tile.data.byteLength);</code></pre>
     for (const button of $("flavors").children) {
       button.setAttribute("aria-pressed", String(button.dataset.id === flavor.id));
     }
-    // setStyle keeps the camera, so the map does not jump.
-    map.setStyle(flavor.url);
-    setHint("loading tiles…");
+    // The builder owns the map style once it is loaded, because the map is then
+    // showing a rendered template rather than the shipped file. Before that, the
+    // shipped style is the honest thing to load.
+    if (builder.base) {
+      resetEdits();
+      setFlavorPalette(flavor.id);
+      apply();
+    } else {
+      map.setStyle(flavor.url);
+      setHint("loading tiles…");
+    }
   }
+
+  /* ------------------------------------------------------------------ *
+   * The builder.
+   *
+   * It renders the template the build published, so what the map shows and what
+   * the copy button hands over are the same style. The renderer is imported from
+   * the same file the build uses to check that, which is the only reason to trust
+   * the two.
+   * ------------------------------------------------------------------ */
+
+  const builder = {
+    data: null,     // builder.json
+    baseId: "light",
+    values: null,   // the palette being edited
+    show: null,     // layer group id -> false to hide
+    base: null,     // the unedited palette for baseId
+  };
+
+  async function loadBuilder() {
+    builder.data = await (await fetch("styles/builder.json")).json();
+    buildBuilderUi();
+    applyHash();
+    apply();
+  }
+
+  function setFlavorPalette(id) {
+    builder.baseId = id;
+    builder.base = builder.data.palettes[id];
+    resetEdits();
+    for (const button of $("builder-flavors").children) {
+      button.setAttribute("aria-pressed", String(button.dataset.id === id));
+    }
+    for (const input of document.querySelectorAll("#builder-colors input")) {
+      input.value = builder.values[input.dataset.key];
+    }
+  }
+
+  function resetEdits() {
+    builder.values = { ...builder.base };
+    builder.show = {};
+    for (const button of $("builder-toggles").children) {
+      button.setAttribute("aria-pressed", "true");
+    }
+  }
+
+  /** Render the current edits and hand the map the result. */
+  function currentStyle() {
+    const values = { ...builder.values, flavor: builder.baseId };
+    const name = builder.values.name;
+    return renderTemplate(builder.data.template, values, builder.show);
+  }
+
+  function apply() {
+    const style = currentStyle();
+    // A half rendered style would draw with literal {{water}} colours. Show the
+    // mistake rather than hide it.
+    const broken = hasUnfilled(style);
+    $("builder-json").textContent = broken
+      ? "// BUG: a colour is unfilled, so this style is not valid:\n" +
+        JSON.stringify(style, null, 2)
+      : JSON.stringify(style, null, 2);
+    $("builder-note").innerHTML = broken
+      ? "A colour is unfilled. Reset, then change one thing at a time."
+      : `<strong>${Object.keys(builder.show).length === 0 ? "No edits yet." :
+          escapeHtml(Object.keys(builder.show).join(", ")) + " hidden."}</strong> ` +
+        "This is a complete MapLibre style. Save it as a .json file and point " +
+        "your map at it.";
+    map.setStyle(style);
+  }
+
+  function escapeHtml(text) {
+    return text.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+  }
+
+  function buildBuilderUi() {
+    const data = builder.data;
+
+    $("builder-flavors").innerHTML = "";
+    for (const flavor of flavors) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.id = flavor.id;
+      button.textContent = flavor.label;
+      button.addEventListener("click", () => setFlavorPalette(flavor.id) || apply());
+      $("builder-flavors").appendChild(button);
+    }
+
+    $("builder-toggles").innerHTML = "";
+    for (const toggle of data.toggles) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.id = toggle.id;
+      button.textContent = toggle.label;
+      button.setAttribute("aria-pressed", "true");
+      button.addEventListener("click", () => {
+        const on = button.getAttribute("aria-pressed") !== "true";
+        button.setAttribute("aria-pressed", String(on));
+        if (on) delete builder.show[toggle.id];
+        else builder.show[toggle.id] = false;
+        apply();
+      });
+      $("builder-toggles").appendChild(button);
+    }
+
+    $("builder-colors").innerHTML = "";
+    for (const group of data.controls) {
+      const wrap = document.createElement("div");
+      wrap.className = "builder-color-group";
+      const heading = document.createElement("h4");
+      heading.textContent = group.group;
+      const grid = document.createElement("div");
+      grid.className = "builder-colors-grid";
+      for (const key of group.keys) {
+        const row = document.createElement("label");
+        row.className = "builder-color";
+        const input = document.createElement("input");
+        input.type = "color";
+        input.dataset.key = key;
+        input.title = key;
+        const name = document.createElement("span");
+        name.textContent = key;
+        const hex = document.createElement("code");
+        hex.dataset.key = key;
+        input.addEventListener("input", () => {
+          builder.values[key] = input.value;
+          hex.textContent = input.value;
+          apply();
+        });
+        row.append(input, name, hex);
+        grid.appendChild(row);
+      }
+      wrap.append(heading, grid);
+      $("builder-colors").appendChild(wrap);
+    }
+  }
+
+  function say(text) {
+    $("builder-status").textContent = text;
+  }
+
+  /** Share links carry only the edits, so the URL stays short enough to paste. */
+  function writeHash() {
+    const packed = packEdits(builder.base, builder.values, builder.show);
+    history.replaceState(null, "", `#s=${packed}`);
+    return `${location.origin}${location.pathname}#s=${packed}`;
+  }
+
+  function applyHash() {
+    const match = /[#&]s=([A-Za-z0-9_-]+)/.exec(location.hash);
+    if (!match) return;
+    try {
+      const { values, show } = unpackEdits(builder.base, match[1]);
+      builder.values = values;
+      builder.show = show;
+      for (const input of document.querySelectorAll("#builder-colors input")) {
+        input.value = builder.values[input.dataset.key];
+        const hex = input.parentElement.querySelector("code");
+        if (hex) hex.textContent = input.value;
+      }
+      for (const button of $("builder-toggles").children) {
+        button.setAttribute("aria-pressed", String(builder.show[button.dataset.id] !== false));
+      }
+      say("loaded a shared style from the link");
+    } catch (error) {
+      say("that share link could not be read: " + error.message);
+    }
+  }
+
+  $("builder-copy").addEventListener("click", async () => {
+    const text = JSON.stringify(currentStyle(), null, 2);
+    try {
+      await navigator.clipboard.writeText(text);
+      say(`copied ${text.length.toLocaleString()} characters`);
+    } catch {
+      // Clipboard needs a secure context and permission. Fall back to a selection
+      // the user can copy by hand rather than failing silently.
+      const pre = $("builder-json");
+      const range = document.createRange();
+      range.selectNodeContents(pre);
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+      say("could not use the clipboard, so the JSON below is selected instead");
+    }
+  });
+
+  $("builder-download").addEventListener("click", () => {
+    const blob = new Blob([JSON.stringify(currentStyle(), null, 2)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `protomaps-basemap-${builder.baseId}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+    say("downloaded");
+  });
+
+  $("builder-share").addEventListener("click", async () => {
+    const link = writeHash();
+    try {
+      await navigator.clipboard.writeText(link);
+      say("share link copied");
+    } catch {
+      say("could not use the clipboard, so the address bar now holds the link");
+    }
+  });
+
+  $("builder-reset").addEventListener("click", () => {
+    resetEdits();
+    for (const input of document.querySelectorAll("#builder-colors input")) {
+      input.value = builder.values[input.dataset.key];
+      const hex = input.parentElement.querySelector("code");
+      if (hex) hex.textContent = input.value;
+    }
+    for (const button of $("builder-toggles").children) {
+      button.setAttribute("aria-pressed", "true");
+    }
+    history.replaceState(null, "", location.pathname);
+    apply();
+    say("reset to " + builder.baseId);
+  });
 
   // Read the archive's metadata and list its layers on the page.
   async function loadSchema() {
