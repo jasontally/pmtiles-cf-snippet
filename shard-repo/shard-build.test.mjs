@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PartExtractor, shardParts } from "./build.mjs";
+import { PartExtractor, groupRuns, shardParts } from "./build.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -172,6 +172,43 @@ await check("every tile part belongs to exactly one shard, with no gap or overla
       `gap or overlap before ${sorted[i].name}`
     );
   }
+});
+
+await check("shards 1 and up download in one Range request", () => {
+  const archive = makeArchive(SMALL);
+  for (const shardIndex of [1, 2]) {
+    const { parts } = planFor(archive, shardIndex, 3);
+    const runs = groupRuns(parts);
+    assert.equal(
+      runs.length,
+      1,
+      `shard ${shardIndex} needs ${runs.length} requests, expected 1`
+    );
+  }
+});
+
+await check("shard 0 downloads in two requests, not one over the whole archive", () => {
+  // The regression this guards: shard 0 owns the head, the first tile parts, and
+  // the tail, with the other shards' tile data in the gap. One request spanning
+  // its first and last part asks for every byte between them, which for the
+  // real archive is all 118 GiB and cannot finish inside the 20 minute build.
+  const archive = makeArchive(SMALL);
+  const { parts } = planFor(archive, 0, 3);
+  const runs = groupRuns(parts);
+  assert.equal(runs.length, 2, `shard 0 needs ${runs.length} requests, expected 2`);
+
+  const partBytes = parts.reduce((sum, part) => sum + part.length, 0);
+  const runBytes = runs.reduce((sum, run) => sum + run.end - run.start, 0);
+  assert.equal(runBytes, partBytes, "the runs must cover exactly the shard's own bytes");
+
+  // The span from the first part to the last must be much larger, which is the
+  // request we are avoiding.
+  const span = parts.at(-1).start + parts.at(-1).length - parts[0].start;
+  assert.ok(span > runBytes, "the fixture has no gap, so it proves nothing");
+  // Every part lands in exactly one run, with no duplicates.
+  const inRuns = runs.flatMap((run) => run.parts);
+  assert.equal(inRuns.length, parts.length);
+  assert.equal(new Set(inRuns.map((p) => p.name)).size, parts.length);
 });
 
 await check("shardParts refuses a shard index outside the range", () => {

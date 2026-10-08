@@ -137,7 +137,31 @@ export function shardParts({ header, total, shardIndex, shardCount, tileShard, l
 }
 
 /**
- * Cut wanted byte ranges out of an incoming stream and write them to disk.
+ * Split parts into maximal runs of adjacent bytes, one Range request each.
+ *
+ * Shards 1 to 12 are a single run, so they use one request. Shard 0 has two:
+ * the head and the first tile parts, then the metadata and leaves, with the
+ * other 12 shards' tile data in the gap between. A single request spanning the
+ * first and last part would ask for the whole 118 GiB archive.
+ *
+ * @returns {Array<{start: number, end: number, parts: Array}>}
+ */
+export function groupRuns(parts) {
+  const runs = [];
+  for (const part of parts) {
+    const open = runs[runs.length - 1];
+    if (open && open.end === part.start) {
+      open.end = part.start + part.length;
+      open.parts.push(part);
+    } else {
+      runs.push({ start: part.start, end: part.start + part.length, parts: [part] });
+    }
+  }
+  return runs;
+}
+
+/**
+ * Read a byte range from a stream, discarding everything outside it.
  *
  * Deliberately not a stream Transform. An async _transform deadlocks node's
  * stream machinery, because the implementation does not await the returned
@@ -284,11 +308,21 @@ async function main() {
   });
   const bytes = parts.reduce((sum, part) => sum + part.length, 0);
 
+  const runs = groupRuns(parts);
+  const runBytes = runs.reduce((sum, run) => sum + run.end - run.start, 0);
+
   console.log(`archive      ${total.toLocaleString()} bytes, maxZoom ${header.maxZoom}`);
   console.log(`shard        ${shardIndex} of ${shardCount}`);
   console.log(`tile parts   ${tileParts.toLocaleString()} total, ${tilePartsPerShard.toLocaleString()} per shard`);
   console.log(`this shard   ${parts.length.toLocaleString()} parts, ${(bytes / 1e9).toFixed(2)} GB`);
-  console.log(`byte range   ${parts[0].start.toLocaleString()} .. ${(parts[parts.length - 1].start + parts[parts.length - 1].length).toLocaleString()}`);
+  console.log(`downloads    ${runs.length}, covering ${(runBytes / 1e9).toFixed(2)} GB`);
+  for (const run of runs) {
+    console.log(
+      `  bytes ${run.start.toLocaleString()}-${(run.end - 1).toLocaleString()}  ` +
+      `${((run.end - run.start) / 1e9).toFixed(2)} GB  ${run.parts.length.toLocaleString()} parts  ` +
+      `${run.parts[0].name} .. ${run.parts[run.parts.length - 1].name}`
+    );
+  }
 
   if (dryRun) {
     console.log(`\nDRY_RUN: nothing downloaded. First 3 parts:`);
@@ -303,54 +337,49 @@ async function main() {
     return;
   }
 
-  // The parts must be contiguous and ascending for the extractor to work.
-  for (let i = 1; i < parts.length; i++) {
-    const expected = parts[i - 1].start + parts[i - 1].length;
-    if (parts[i].start !== expected) {
+  // Download each run of adjacent parts as its own Range request.
+  //
+  // One request per shard is not possible. Shard 0 holds the head, then the
+  // first tile parts, then the metadata and leaves, with the other 12 shards'
+  // tile data in between. A single request spanning its first and last part
+  // would be the whole 118 GiB archive, which does not fit the 20 minute build.
+  // Fetching only the runs keeps shard 0 at its own 10.05 GB.
+  console.log(
+    `\ndownloading ${(bytes / 1e9).toFixed(2)} GB in ${runs.length} ` +
+    `${runs.length === 1 ? "request" : "requests"}`
+  );
+  const started = Date.now();
+  let written = 0;
+
+  for (const run of runs) {
+    const response = await fetch(url, {
+      headers: { Range: `bytes=${run.start}-${run.end - 1}` },
+    });
+    if (response.status !== 206) fail(`download returned ${response.status}`);
+    if (!response.body) fail("download had no body");
+
+    const extractor = new PartExtractor(run.parts, outDir, run.start);
+    await extractor.consume(Readable.fromWeb(response.body));
+
+    if (!extractor.complete) {
+      const missing = run.parts[extractor.index];
       fail(
-        `parts are not contiguous: ${parts[i - 1].name} ends at ${expected} but ` +
-        `${parts[i].name} starts at ${parts[i].start}. Shard 0 has gaps by ` +
-        `design, so it must be downloaded in sections, not as one stream.`
+        `the download ended before ${missing.name}. ` +
+        `Got ${extractor.written.toLocaleString()} of ` +
+        `${(run.end - run.start).toLocaleString()} bytes for this run.`
       );
     }
-  }
-
-  console.log(`\ndownloading ${(bytes / 1e9).toFixed(2)} GB`);
-  const started = Date.now();
-
-  // Download only this shard's byte range. Shard 0 is contiguous too: the head,
-  // then the tile parts, then metadata and leaves, with the tile section in
-  // between, so shard 0 needs its sections fetched in order rather than as one
-  // span. Fetch the span from the first to the last part and let the extractor
-  // pick out the wanted parts; the bytes between are discarded as they stream
-  // past, so they cost bandwidth but not disk.
-  const first = parts[0].start;
-  const last = parts[parts.length - 1];
-  const response = await fetch(url, {
-    headers: { Range: `bytes=${first}-${last.start + last.length - 1}` },
-  });
-  if (response.status !== 206) fail(`download returned ${response.status}`);
-  if (!response.body) fail("download had no body");
-
-  const extractor = new PartExtractor(parts, outDir, first);
-  await extractor.consume(Readable.fromWeb(response.body));
-
-  if (!extractor.complete) {
-    const missing = parts[extractor.index];
-    fail(
-      `the download ended before ${missing.name}. ` +
-      `Got ${extractor.written.toLocaleString()} of ${bytes.toLocaleString()} bytes.`
-    );
+    written += extractor.written;
   }
 
   const seconds = (Date.now() - started) / 1000;
   console.log(
-    `wrote ${extractor.written.toLocaleString()} bytes in ${seconds.toFixed(1)}s ` +
-    `(${(extractor.written / 1e6 / seconds).toFixed(1)} MB/s)`
+    `wrote ${written.toLocaleString()} bytes in ${seconds.toFixed(1)}s ` +
+    `(${(written / 1e6 / seconds).toFixed(1)} MB/s)`
   );
 
-  if (extractor.written !== bytes) {
-    fail(`wrote ${extractor.written} bytes, expected ${bytes}. The download was short.`);
+  if (written !== bytes) {
+    fail(`wrote ${written} bytes, expected ${bytes}. The download was short.`);
   }
 
   // The parts must exist and be the right size, or the upload silently
