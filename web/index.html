@@ -1,0 +1,467 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Protomaps Basemap tiles — free, no API key</title>
+<meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee.">
+
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css">
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js"></script>
+
+<style>
+  :root {
+    --bg: #fbfaf7;
+    --panel: #ffffff;
+    --ink: #24231f;
+    --muted: #6d6a61;
+    --line: #e2ded4;
+    --accent: #1d6f5c;
+    --code-bg: #f3f1ea;
+    --max: 62rem;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #1b1d1f; --panel: #232629; --ink: #e6e4de; --muted: #a09c93;
+      --line: #34383b; --accent: #63c9a8; --code-bg: #1e2123;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+  code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
+  a { color: var(--accent); }
+
+  header.hero { padding: 3rem 0 1.5rem; }
+  h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 .5rem; letter-spacing: -.02em; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 46rem; margin: 0 0 1.5rem; }
+  .url {
+    display: block; background: var(--code-bg); border: 1px solid var(--line);
+    border-radius: 8px; padding: .8rem 1rem; overflow-x: auto; white-space: nowrap;
+  }
+  .facts { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 1.5rem 0 0; padding: 0; list-style: none; }
+  .facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .85rem 1rem; }
+  .facts b { display: block; font-size: 1.05rem; margin-bottom: .1rem; }
+  .facts span { color: var(--muted); font-size: .9rem; }
+
+  section { margin-top: 3.5rem; }
+  h2 { font-size: 1.4rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
+  h2 + .sub { color: var(--muted); margin: 0 0 1.25rem; }
+  h3 { font-size: 1.05rem; margin: 2rem 0 .5rem; }
+
+  pre {
+    background: var(--code-bg); border: 1px solid var(--line); border-radius: 8px;
+    padding: 1rem; overflow-x: auto; font-size: .84rem; line-height: 1.55; margin: .5rem 0 0;
+  }
+  pre .c { color: var(--muted); }         /* comments */
+  pre .s { color: var(--accent); }        /* strings */
+  pre .d { color: #b4623a; }              /* diff removed */
+  pre .a { color: #2f7d4f; }              /* diff added */
+  @media (prefers-color-scheme: dark) { pre .d { color: #e0806a; } pre .a { color: #7fc99a; } }
+
+  /* map */
+  #map { position: relative; height: min(66vh, 34rem); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  .flavors { position: absolute; top: .6rem; left: .6rem; z-index: 2; display: flex; gap: .3rem; }
+  .flavors button {
+    display: flex; align-items: center; gap: .4rem; font: inherit; font-size: .85rem;
+    padding: .35rem .7rem; border-radius: 999px; cursor: pointer;
+    background: rgba(255,255,255,.94); color: #24231f; border: 1px solid rgba(0,0,0,.12);
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  .flavors button[aria-pressed="true"] { background: #24231f; color: #fff; border-color: #24231f; }
+  .flavors .dot { width: .7rem; height: .7rem; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); }
+  .tools { position: absolute; top: .6rem; right: .6rem; z-index: 2; display: flex; gap: .3rem; }
+  .tools button {
+    font: inherit; font-size: .85rem; padding: .35rem .7rem; border-radius: 999px; cursor: pointer;
+    background: rgba(255,255,255,.94); color: #24231f; border: 1px solid rgba(0,0,0,.12);
+    box-shadow: 0 1px 3px rgba(0,0,0,.18);
+  }
+  .maphint { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
+    font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
+
+  /* json dialog */
+  dialog {
+    border: 1px solid var(--line); border-radius: 12px; padding: 0; background: var(--panel); color: var(--ink);
+    width: min(52rem, 92vw); max-height: 82vh;
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  .dlg-head { display: flex; align-items: center; gap: .75rem; padding: .9rem 1.1rem; border-bottom: 1px solid var(--line); position: sticky; top: 0; background: var(--panel); }
+  .dlg-head h3 { margin: 0; font-size: 1rem; }
+  .dlg-head .grow { flex: 1; }
+  .dlg-body { padding: 0 1.1rem 1.1rem; overflow: auto; max-height: calc(82vh - 3.4rem); }
+  .dlg-body pre { border: 0; padding: 1.1rem 0 0; }
+
+  table { border-collapse: collapse; width: 100%; font-size: .9rem; }
+  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
+  td.mono, th.mono { font-size: .84rem; }
+  .scroll { overflow-x: auto; }
+  .note { border-left: 3px solid var(--line); padding: .1rem 0 .1rem 1rem; color: var(--muted); }
+  .swatch { display: inline-block; width: .8rem; height: .8rem; border-radius: 3px; border: 1px solid rgba(0,0,0,.2); vertical-align: -1px; }
+  footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header class="hero">
+  <h1>Protomaps Basemap tiles</h1>
+  <p class="lede">
+    The whole Protomaps Basemap, zoom 0 to 15, served as one PMTiles archive over
+    plain HTTP. Point any PMTiles client at the URL and it works. There is no API
+    key, no account, and no rate limit.
+  </p>
+
+  <code class="url mono">https://tiles.jasontally.com/basemap.pmtiles</code>
+
+  <ul class="facts">
+    <li><b>No API key</b><span>Nothing to sign up for, no token in your code.</span></li>
+    <li><b>No rate limit</b><span>No throttling, no quota, no burst cap.</span></li>
+    <li><b>No SLA</b><span>Best effort only. See what that means below.</span></li>
+    <li><b>Zoom 0 to 15</b><span>Vector tiles, gzip, 118&nbsp;GiB of archive.</span></li>
+  </ul>
+</header>
+
+<section id="try">
+  <h2>Try it</h2>
+  <p class="sub">The same archive in three styles. Switching style keeps the tiles already loaded, so it is instant.</p>
+
+  <div id="map">
+    <div class="flavors" id="flavors" role="group" aria-label="Style"></div>
+    <div class="tools">
+      <button type="button" id="show-style">Style JSON</button>
+      <button type="button" id="show-meta">Archive metadata</button>
+    </div>
+    <span class="maphint" id="maphint">loading tiles…</span>
+  </div>
+</section>
+
+<section id="use">
+  <h2>Use it</h2>
+  <p class="sub">The archive speaks HTTP range requests, so every PMTiles client can read it.</p>
+
+  <h3>One. Put a map on the page</h3>
+  <p>Copy this file. It is the whole example: two script tags, one style URL, one map.</p>
+<pre><code>&lt;!doctype html&gt;
+&lt;html&gt;
+&lt;head&gt;
+  &lt;meta charset="utf-8"&gt;
+  &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
+  &lt;title&gt;Basemap&lt;/title&gt;
+  &lt;link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.css"&gt;
+  &lt;script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5/dist/maplibre-gl.js"&gt;&lt;/script&gt;
+  &lt;script src="https://cdn.jsdelivr.net/npm/pmtiles@3/dist/pmtiles.js"&gt;&lt;/script&gt;
+  &lt;style&gt;html, body, #map { margin: 0; height: 100%; }&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+  &lt;div id="map"&gt;&lt;/div&gt;
+  &lt;script&gt;
+    <span class="c">// Teach MapLibre how to read a PMTiles archive.</span>
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol(<span class="s">"pmtiles"</span>, protocol.tile);
+
+    new maplibregl.Map({
+      container: <span class="s">"map"</span>,
+      style: <span class="s">"https://tiles.jasontally.com/styles/light.json"</span>,
+      center: [2.35, 48.85],   <span class="c">// Paris</span>
+      zoom: 4
+    });
+  &lt;/script&gt;
+&lt;/body&gt;
+&lt;/html&gt;</code></pre>
+
+  <h3>Two. Swap the tiles in a style you already have</h3>
+  <p>
+    Every MapLibre style reads its tiles from a source. To use these tiles, change
+    that one <code>url</code>. Nothing else in the style changes.
+  </p>
+<pre><code>  <span class="s">"sources"</span>: {
+    <span class="s">"protomaps"</span>: {
+      <span class="s">"type"</span>: <span class="s">"vector"</span>,
+<span class="d">-     "url": "pmtiles://https://demo-bucket.protomaps.com/v4.pmtiles",</span>
+<span class="a">+     "url": "pmtiles://https://tiles.jasontally.com/basemap.pmtiles",</span>
+      <span class="s">"attribution"</span>: <span class="s">"&lt;a href=\"https://www.openstreetmap.org/copyright\"&gt;&amp;copy; OpenStreetMap contributors&lt;/a&gt;"</span>
+    }
+  }</code></pre>
+
+  <p>Or do it in code, which is useful if the style comes from a server you do not control:</p>
+<pre><code><span class="c">// Rewrite every PMTiles source in a style to point at these tiles.</span>
+const style = await (await fetch(<span class="s">"https://your-server/style.json"</span>)).json();
+
+for (const source of Object.values(style.sources)) {
+  if (source.url?.startsWith(<span class="s">"pmtiles://"</span>)) {
+    source.url = <span class="s">"pmtiles://https://tiles.jasontally.com/basemap.pmtiles"</span>;
+  }
+}
+
+new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.35, 48.85], zoom: 4 });</code></pre>
+
+  <p class="note">
+    <strong>One thing to check before you swap.</strong> This archive is
+    <strong>Protomaps schema v3</strong>. A style written for a different schema
+    will load and then draw nothing, because the source layer names do not match.
+    The nine layer names are listed below, and so is a ready-made v3 style you can
+    copy from.
+  </p>
+
+  <h3>Three. About Leaflet</h3>
+  <p class="note">
+    These are <strong>vector</strong> tiles. Leaflet draws raster tiles, and the
+    PMTiles library will refuse this archive in Leaflet with
+    <code>archive contains MVT vector tiles, but leafletRasterLayer is for
+    displaying raster tiles</code>. That is the library being correct, not a bug.
+    Use MapLibre GL as above. If you need Leaflet or a raster image pipeline, you
+    need a raster-rendered archive, which this is not.
+  </p>
+
+  <h3>Four. Read the archive with the PMTiles library</h3>
+  <p>No map, just data. Useful for scripts, tests and anything that is not a picture.</p>
+<pre><code>import { PMTiles, FetchSource } from <span class="s">"pmtiles"</span>;
+
+const archive = new PMTiles(new FetchSource(<span class="s">"https://tiles.jasontally.com/basemap.pmtiles"</span>));
+
+const header = await archive.getHeader();
+console.log(header.minZoom, header.maxZoom);        <span class="c">// 0 15</span>
+console.log(header.numAddressedTiles);              <span class="c">// 1431655765</span>
+
+const metadata = await archive.getMetadata();
+console.log(metadata.name);                          <span class="c">// "Protomaps Basemap"</span>
+
+const tile = await archive.getZxy(3, 4, 2);          <span class="c">// z, x, y</span>
+console.log(tile.data.byteLength);</code></pre>
+  <p class="note">
+    Note the two classes. <code>FetchSource</code> is the byte reader over HTTP, and
+    <code>PMTiles</code> is the reader that sits on top of it and understands the
+    format. <code>FileSource</code> is the local-file equivalent of
+    <code>FetchSource</code>; given a URL string it will not work.
+  </p>
+  <p class="note">
+    The archive is a fixed snapshot and is not being refreshed. If you need current
+    OpenStreetMap data, use a source that publishes updates.
+  </p>
+</section>
+
+<section id="styles">
+  <h2>Styles</h2>
+  <p class="sub">Same tiles, different colours. Pick one, copy it, change it, it is yours.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Style</th><th>Looks like</th><th>File</th></tr></thead>
+      <tbody id="style-rows"></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="schema">
+  <h2>What is in the tiles</h2>
+  <p class="sub">Read from the archive's own metadata at page load. These are the layer names a style must use.</p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th class="mono">Source layer</th><th>Zoom</th><th>Fields</th></tr></thead>
+      <tbody id="schema-rows"><tr><td colspan="3">loading…</td></tr></tbody>
+    </table>
+  </div>
+</section>
+
+<section id="limits">
+  <h2>What this is not</h2>
+  <p class="sub">Plain answers, so nothing here surprises you later.</p>
+
+  <ul>
+    <li>
+      <strong>There is no service level guarantee.</strong> This is a free service
+      with no contract behind it. It can be slow, it can go down, and the URL and
+      the data can change or disappear without notice. If your product depends on
+      it, host your own copy of the tiles or buy a supported plan from someone.
+    </li>
+    <li>
+      <strong>The data is not being refreshed.</strong> The archive is a snapshot of
+      the Protomaps Basemap. New OpenStreetMap edits do not appear in it.
+    </li>
+    <li>
+      <strong>No whole-file download.</strong> Requests are answered in ranges of at
+      most 512&nbsp;KiB, which is all a PMTiles client ever asks for. Asking for the
+      whole 118&nbsp;GiB in one request returns <code>416</code>, which is correct.
+    </li>
+    <li>
+      <strong>Attribution is required.</strong> The tiles are derived from
+      OpenStreetMap. Keep the attribution line in your style or on your map.
+    </li>
+  </ul>
+</section>
+
+<footer>
+  Tiles: <a href="https://github.com/protomaps/basemaps">Protomaps Basemap</a>, derived from
+  <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.
+  PMTiles archive served from <span class="mono">tiles.jasontally.com</span>.
+</footer>
+
+</div>
+
+<dialog id="style-dialog">
+  <div class="dlg-head">
+    <h3 id="style-title">Style JSON</h3>
+    <span class="grow"></span>
+    <a id="style-raw" href="#" target="_blank" rel="noopener">open raw</a>
+    <button type="button" id="style-close">Close</button>
+  </div>
+  <div class="dlg-body"><pre id="style-json"></pre></div>
+</dialog>
+
+<script>
+(function () {
+  "use strict";
+  const TILES = "https://tiles.jasontally.com/basemap.pmtiles";
+  const $ = (id) => document.getElementById(id);
+
+  let map = null;
+  let flavors = [];
+  let current = null;
+
+  // The archive is a PMTiles file, so read its own metadata rather than
+  // hard-coding the layer names on this page.
+  let archive = null;
+
+  function setHint(text) { $("maphint").textContent = text; }
+
+  function countSourceEvents(mapInstance) {
+    let failed = 0;
+    mapInstance.on("error", (e) => { failed += 1; });
+    return () => failed;
+  }
+
+  async function boot() {
+    const index = await (await fetch("styles/index.json")).json();
+    flavors = index.flavors;
+    current = flavors[0];
+
+    // flavour buttons
+    $("flavors").innerHTML = "";
+    for (const flavor of flavors) {
+      const button = document.createElement("button");
+      button.type = "button";
+      button.dataset.id = flavor.id;
+      button.setAttribute("aria-pressed", String(flavor.id === current.id));
+      button.innerHTML =
+        '<span class="dot" style="background:' + flavor.swatch + '"></span>' + flavor.label;
+      button.addEventListener("click", () => selectFlavor(flavor));
+      $("flavors").appendChild(button);
+    }
+
+    // style table
+    $("style-rows").innerHTML = flavors.map((f) =>
+      '<tr><td>' + f.label + '</td>' +
+      '<td><span class="swatch" style="background:' + f.swatch + '"></span></td>' +
+      '<td class="mono"><a href="' + f.url + '" target="_blank" rel="noopener">' +
+      f.url + '</a></td></tr>'
+    ).join("");
+
+    // the map
+    const protocol = new pmtiles.Protocol();
+    maplibregl.addProtocol("pmtiles", protocol.tile);
+
+    map = new maplibregl.Map({
+      container: "map",
+      style: current.url,
+      center: [2.35, 48.85],
+      zoom: 4.2,
+      attributionControl: false
+    });
+    map.addControl(new maplibregl.AttributionControl({ compact: true }));
+
+    const failed = countSourceEvents(map);
+    map.on("idle", () => {
+      if (failed() === 0) setHint("tiles from tiles.jasontally.com");
+      else setHint(failed() + " tile request(s) failed, see the browser console");
+    });
+
+    loadSchema();
+  }
+
+  function selectFlavor(flavor) {
+    if (flavor.id === current.id) return;
+    current = flavor;
+    for (const button of $("flavors").children) {
+      button.setAttribute("aria-pressed", String(button.dataset.id === flavor.id));
+    }
+    // setStyle keeps the camera, so the map does not jump.
+    map.setStyle(flavor.url);
+    setHint("loading tiles…");
+  }
+
+  // Read the archive's metadata and list its layers on the page.
+  async function loadSchema() {
+    try {
+      // FetchSource reads bytes over HTTP, PMTiles understands the format.
+      archive = archive || new pmtiles.PMTiles(new pmtiles.FetchSource(TILES));
+      const meta = await archive.getMetadata();
+      const layers = (meta.vector_layers || []).slice()
+        .sort((a, b) => a.id.localeCompare(b.id));
+      $("schema-rows").innerHTML = layers.map((l) =>
+        '<tr><td class="mono">' + l.id + "</td>" +
+        "<td>z" + l.minzoom + "–z" + l.maxzoom + "</td>" +
+        '<td class="mono">' + Object.keys(l.fields || {}).length +
+        ' &nbsp;<span style="color:var(--muted)">' +
+        Object.keys(l.fields || {}).slice(0, 8).join(", ") +
+        (Object.keys(l.fields || {}).length > 8 ? ", …" : "") +
+        "</span></td></tr>"
+      ).join("");
+    } catch (error) {
+      $("schema-rows").innerHTML =
+        '<tr><td colspan="3">could not read the archive metadata: ' +
+        String(error.message || error) + "</td></tr>";
+    }
+  }
+
+  // ---- the JSON viewers ----
+  const dialog = $("style-dialog");
+  async function showJson(title, url) {
+    $("style-title").textContent = title;
+    $("style-raw").href = url;
+    $("style-json").textContent = "loading…";
+    dialog.showModal();
+    try {
+      const text = await (await fetch(url)).text();
+      $("style-json").textContent = JSON.stringify(JSON.parse(text), null, 2);
+    } catch (error) {
+      $("style-json").textContent = "could not load " + url + ": " + error;
+    }
+  }
+  $("show-style").addEventListener("click", () =>
+    showJson("Style JSON — " + current.label, current.url));
+  $("show-meta").addEventListener("click", async () => {
+    $("style-title").textContent = "Archive metadata";
+    $("style-raw").removeAttribute("href");
+    $("style-json").textContent = "loading…";
+    dialog.showModal();
+    try {
+      const source = archive || new pmtiles.PMTiles(new pmtiles.FetchSource(TILES));
+      const header = await source.getHeader();
+      const metadata = await source.getMetadata();
+      $("style-json").textContent = JSON.stringify({
+        url: TILES,
+        header: {
+          minZoom: header.minZoom, maxZoom: header.maxZoom,
+          tileType: header.tileType,
+          bounds: [header.minLon, header.minLat, header.maxLon, header.maxLat]
+        },
+        metadata
+      }, null, 2);
+    } catch (error) {
+      $("style-json").textContent = "could not read the archive: " + error;
+    }
+  });
+  $("style-close").addEventListener("click", () => dialog.close());
+
+  boot().catch((error) => {
+    setHint("failed to start: " + error);
+    console.error(error);
+  });
+})();
+</script>
+</body>
+</html>

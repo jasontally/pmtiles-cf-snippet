@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Serve a 118 GiB PMTiles archive from Cloudflare Static Assets with a Snippet",
   "scripts": {
-    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js",
+    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js && node web/make-styles.test.mjs",
     "test:rules": "node --test snippet-rules.test.mjs",
     "test:split": "python3 shard-pmtiles.py --selftest",
     "test:snippet": "node snippet-test.js",
@@ -18,6 +18,9 @@
     "deploy:assets-only": "npx wrangler deploy",
     "deploy:all": "node build.mjs all",
     "split": "python3 shard-pmtiles.py",
-    "verify": "python3 shard-pmtiles.py", "verify:live": "python3 verify-live.py"
+    "verify": "python3 shard-pmtiles.py",
+    "verify:live": "python3 verify-live.py",
+    "test:styles": "node web/make-styles.test.mjs",
+    "styles": "node web/make-styles.mjs"
   }
 }

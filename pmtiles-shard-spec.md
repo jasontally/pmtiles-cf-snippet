@@ -378,6 +378,52 @@ point `ARCHIVE_PATH` at a mounted copy.
 The first build uploads 65,259 files and 118 GiB. Later builds upload only the
 parts whose content changed. See section 6.2.
 
+## 11.2 The public documentation page
+
+`web/index.html` is served at the root of the reader host. It states what the
+service is: no API key, no rate limit, no service level guarantee. It does not
+describe how the archive is stored, because that is not the reader's business and
+it would tie the page to an implementation that can change.
+
+It carries:
+
+- the archive URL, and the four facts above it
+- a live map with a flavour switch
+- a **Style JSON** button that shows the current style, and an **Archive
+  metadata** button that shows the archive's own metadata
+- the nine source layers, read from the archive at page load
+- a copy-and-paste HTML example, a one-line style diff, a rewrite function, and a
+  script example
+- an honest list of what the service is not
+
+`web/make-styles.mjs` writes `styles/index.json` plus one style per flavour from
+a single template, so the flavours cannot drift apart structurally. `index.json`
+is what the page builds its buttons from, so adding a flavour needs no page
+change.
+
+### Flavours are free because the data is already classified
+
+The archive holds one set of tiles with every cartographic class already in the
+data. A flavour is only a different set of colours over the same tiles, so
+switching keeps the tiles the browser already has and costs no new requests.
+
+Three are offered: light, bright and dark. The Protomaps basemap palette is warm
+and low-contrast, which suits a light background and needs a separate, cooler
+palette for dark. Reusing one palette for both was tried and looked wrong.
+
+### Two things the page had to be corrected about
+
+Found by loading the page in a browser, not by reading the code:
+
+- The PMTiles browser library has two classes, not one. `FetchSource` reads bytes
+  over HTTP and `PMTiles` understands the format. `FileSource` is the local-file
+  equivalent of `FetchSource`, and passing it a URL string fails with
+  `blob.arrayBuffer is not a function`.
+- `pmtiles.leafletRasterLayer` refuses this archive with
+  `archive contains MVT vector tiles, but leafletRasterLayer is for displaying
+  raster tiles`. That is correct behaviour, so the page explains it instead of
+  showing an example that cannot work.
+
 ## 12. Verification tests
 
 Run these in order against the live deployment.

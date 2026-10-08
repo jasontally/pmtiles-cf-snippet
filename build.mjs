@@ -48,7 +48,7 @@
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
-  existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
+  copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync,
 } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -681,7 +681,42 @@ async function prepare() {
   const out = join(DIST_DIR, "snippet.min.js");
   writeFileSync(out, small);
   console.log(`wrote ${out} (${Buffer.byteLength(small)} bytes)`);
+
+  // The documentation page and the styles it offers. Source lives in web/ so the
+  // asset tree stays purely generated, and so a stray split cannot commit 118
+  // GiB of parts. prepare writes it because the deploy step uploads it.
+  writeDocs();
   return haveAssets;
+}
+
+/**
+ * Copy web/index.html to public/ and write the styles beside it.
+ *
+ * Both are needed on the same origin as the archive, because the styles point at
+ * the archive by absolute URL and the page fetches styles/index.json relatively.
+ */
+function writeDocs() {
+  step("write the documentation page");
+  const webDir = join(ROOT, "web");
+  const page = join(webDir, "index.html");
+  if (!existsSync(page)) {
+    console.log(`no ${page}, skipping`);
+    return;
+  }
+  mkdirSync(PUBLIC_DIR, { recursive: true });
+  copyFileSync(page, join(PUBLIC_DIR, "index.html"));
+  console.log(`public/index.html (${statSync(page).size} bytes)`);
+
+  // The generator is a separate process so a style error fails the build with a
+  // non-zero exit rather than being swallowed.
+  const generator = join(webDir, "make-styles.mjs");
+  const result = spawnSync(process.execPath, [generator], { encoding: "utf8" });
+  if (result.status !== 0) {
+    fail(`the style generator failed:\n${result.stdout || ""}${result.stderr || ""}`);
+  }
+  for (const line of (result.stdout || "").trim().split("\n")) {
+    console.log(`  ${line.trim()}`);
+  }
 }
 
 /**
