@@ -444,8 +444,11 @@ every part against the archive, and minifies the snippet to
 `npm run deploy` is `node build.mjs deploy`. It uploads the assets, then uploads
 the snippet and sets its rule.
 
-**The deploy command must not stay `npx wrangler deploy`.** Wrangler cannot
-upload a snippet. A snippet is a zone resource, and it needs the Snippets API.
+**The deploy command must not stay `npx wrangler deploy`.** Wrangler deploys a
+Worker. A snippet is not part of a Worker, it is a zone resource, and it needs
+the Snippets API. With `npx wrangler deploy` the parts upload and the snippet
+never does, so `tiles.jasontally.com/basemap.pmtiles` keeps returning `404`.
+
 Running wrangler in the build step as well would upload the asset set twice.
 
 The `name` in `wrangler.jsonc` must match the Worker name in the dashboard, or

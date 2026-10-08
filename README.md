@@ -89,16 +89,36 @@ every part against the archive byte for byte, and minifies the snippet into
 wrangler, then uploads the snippet and sets its rule. The snippet goes second,
 so the parts are in place before the URL starts answering range requests.
 
-**The deploy command must be `npm run deploy`, not `npx wrangler deploy`.**
-Wrangler cannot upload a snippet. A snippet is a zone resource, not part of a
-Worker, so it needs the Snippets API. If you keep `npx wrangler deploy` as the
-deploy command, set the build command to `npm run build:s snippet` instead. That
-works, but it uploads the snippet before the assets, and a preview build would
-overwrite the production snippet, because preview branches run the build command
-and not the deploy command.
+### The deploy command must be `npm run deploy`
+
+This is the answer to the question "does the snippet deploy yet". It does not,
+while the deploy command is `npx wrangler deploy`.
+
+Wrangler deploys a Worker. A snippet is not part of a Worker. A snippet is a
+zone resource and needs the Snippets API. So `npx wrangler deploy` uploads the
+asset parts and nothing else, and `tiles.jasontally.com/basemap.pmtiles` keeps
+returning `404`.
+
+Do not put the snippet upload in the build command instead. A preview build runs
+the build command, and a preview runs for every branch except `main`. The snippet
+would then be overwritten from a preview branch.
+
+If the dashboard refuses a custom deploy command, use this pairing as a fallback:
+
+| Setting | Value |
+|---|---|
+| Build command | `npm run build:snippet` |
+| Deploy command | `npx wrangler deploy` |
+
+It works, but it uploads the snippet before the assets. A range request during
+the gap returns `502` rather than `404`.
 
 The name in `wrangler.jsonc` must match the Worker name in the dashboard, or the
 build fails. It is `pmtiles-cf-snippet`.
+
+`public/_headers` is committed. Wrangler refuses to deploy when the assets
+directory is missing, and the directory would be missing on every build until an
+archive is uploaded. The 65,259 part files stay out of the repository.
 
 Secrets to set as build secrets:
 
