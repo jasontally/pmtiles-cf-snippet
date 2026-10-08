@@ -1,5 +1,6 @@
 /**
- * Cloudflare Snippet: serve a PMTiles archive that is split across Static Asset files.
+ * Cloudflare Snippet: serve a PMTiles archive that is split across Static Asset
+ * files on 13 separate Workers.
  *
  * WHY THIS IS NOT A PLAIN RANGE SERVER
  * Workers Static Assets do not answer HTTP Range requests. There is no
@@ -12,6 +13,18 @@
  *   - bytes=<off>-<end>           one leaf directory, or one tile
  * The largest request measured from the Protomaps basemap is a leaf directory of
  * 150,036 bytes. A tile is usually about 200 bytes.
+ *
+ * WHY 13 HOSTS
+ * The archive is 126,775,469,007 bytes, 118 GiB. A Workers Builds container has
+ * 20 GB of disk and about 30 usable minutes, so no single build can hold or
+ * upload it. The archive is therefore split across 13 Workers, each with its own
+ * repo, build, and hostname s.tiles0..s.tiles12.jasontally.com.
+ *
+ * Shard k owns tile parts [k * tilePartsPerShard, (k+1) * tilePartsPerShard).
+ * Boundaries land on part boundaries, never inside a part, so a part number
+ * gives its shard with one integer division and a tile request always costs one
+ * subrequest. The head, the metadata, and the leaf directories are all small, so
+ * they live in shard 0 together, and shard 0 is pure tile data before them.
  *
  * Budget for this snippet: 2 subrequests (the Pro plan limit), 5 ms of CPU,
  * 2 MB of memory, 32 KB of package. No caches.default here, because a Cache API
@@ -27,15 +40,15 @@
  * size would either overflow the file limit or oversize the leaf parts.
  * See pmtiles-shard-spec.md section 5.
  *
- * ARCHIVE LAYOUT, written by shard-pmtiles.py
- *   head.bin          bytes [0, headEnd)
- *   tile/NNNNNN.bin   bytes [tileOffset, tileOffset + tileSpan), tileShard each
- *   meta.bin          bytes [metaOffset, metaOffset + metaSpan)
- *   leaf/NNNNNN.bin   bytes [leafOffset, leafOffset + leafSpan), leafShard each
+ * ARCHIVE LAYOUT, written by each shard build
+ *   head.bin          bytes [0, headEnd)                shard 0
+ *   tile/NNNNNN.bin   bytes [tileOffset, metaOffset)   shard floor(N / tilePartsPerShard)
+ *   meta.bin          bytes [metaOffset, leafOffset)   shard 0
+ *   leaf/NNNNNN.bin   bytes [leafOffset, total)        shard 0
  *
  * Ceiling: part sizes are build time constants. A request that would need more
- * than 2 parts, or more than MAX_RESPONSE bytes, gets 416. See
- * pmtiles-shard-spec.md sections 6.1 and 8.
+ * than 2 parts, more than MAX_RESPONSE bytes, or a shard outside SHARD_COUNT
+ * gets 416. See pmtiles-shard-spec.md sections 6.1 and 8.
  */
 
 const HEAD_BYTES = 16384;
@@ -49,8 +62,15 @@ const MAX_RESPONSE = 524288;
 // read in one piece, which is cheaper than streaming.
 const BUFFER_LIMIT = 1048576;
 
+// The shard host names. Written as a pattern because the index is the only
+// thing that changes, and the index is computed, never stored.
+const SHARD_HOST_PREFIX = "https://s.tiles";
+const SHARD_HOST_SUFFIX = ".jasontally.com";
+const SHARD_COUNT = 13;
+
 const ARCHIVES = {
-  // total, headEnd, tileOffset, metaOffset, leafOffset, tileShard, leafShard
+  // total, headEnd, tileOffset, metaOffset, leafOffset, tileShard, leafShard,
+  // tilePartsPerShard
   basemap: {
     total: 126775469007,
     headEnd: 16384,
@@ -59,6 +79,7 @@ const ARCHIVES = {
     leafOffset: 126450546941,
     tileShard: 2000000,
     leafShard: 160000,
+    tilePartsPerShard: 4864,
   },
 };
 
@@ -107,7 +128,7 @@ export default {
         // The parts are read together so a two part request costs one round
         // trip in parallel, not two in series.
         const chunks = await Promise.all(
-          reads.map((read) => fetchPart(url, name, archive, read))
+          reads.map((read) => fetchPart(name, archive, read))
         );
         for (const chunk of chunks) {
           body.set(chunk, written);
@@ -151,22 +172,30 @@ function archiveName(pathname) {
   return name;
 }
 
+/** The origin that holds shard `host`. */
+function shardOrigin(host) {
+  return `${SHARD_HOST_PREFIX}${host}${SHARD_HOST_SUFFIX}`;
+}
+
 /**
  * Map a client byte range onto the asset reads that serve it.
- * Returns a list of { kind, index, offset, length }, or null if the range
- * falls outside the archive or cannot be served.
+ *
+ * Every read names the shard it lives on, because the shards are different
+ * origins. A tile read is one part on one shard; only a range that straddles a
+ * part boundary, or a shard boundary, needs two reads.
+ *
+ * Returns a list of { kind, host, index, offset, length }, or null if the range
+ * cannot be served.
  */
-function planReads(start, end, archive) {
+export function planReads(start, end, archive) {
+  // A section with no partSize is a single file. tile and leaf are cut into
+  // parts. Every section runs until the next one starts, or until the end.
   const sections = [
-    { kind: "head", start: 0, end: archive.headEnd, shard: 0 },
-    { kind: "tile", start: archive.tileOffset, shard: archive.tileShard },
-    { kind: "meta", start: archive.metaOffset, shard: 0 },
-    { kind: "leaf", start: archive.leafOffset, shard: archive.leafShard },
+    { kind: "head", start: 0, end: archive.headEnd },
+    { kind: "tile", start: archive.tileOffset, end: archive.metaOffset, partSize: archive.tileShard },
+    { kind: "meta", start: archive.metaOffset, end: archive.leafOffset },
+    { kind: "leaf", start: archive.leafOffset, end: archive.total, partSize: archive.leafShard },
   ];
-  // tile and leaf run until the next section starts.
-  sections[1].end = archive.metaOffset;
-  sections[2].end = archive.leafOffset;
-  sections[3].end = archive.total;
 
   const reads = [];
   for (const section of sections) {
@@ -176,20 +205,31 @@ function planReads(start, end, archive) {
     const lo = Math.max(start, section.start) - section.start;
     const hi = Math.min(end, section.end - 1) - section.start;
 
-    if (section.shard === 0) {
-      reads.push({ kind: section.kind, index: 0, offset: lo, length: hi - lo + 1 });
+    if (!section.partSize) {
+      reads.push({ kind: section.kind, host: 0, index: 0, offset: lo, length: hi - lo + 1 });
       continue;
     }
-    const first = Math.floor(lo / section.shard);
-    const last = Math.floor(hi / section.shard);
+
+    const first = Math.floor(lo / section.partSize);
+    const last = Math.floor(hi / section.partSize);
     if (last - first + 1 > MAX_SUBREQUESTS) return null;
+
     for (let index = first; index <= last; index++) {
-      const partStart = index * section.shard;
+      const partStart = index * section.partSize;
       const a = Math.max(lo, partStart) - partStart;
-      const b = Math.min(hi, partStart + section.shard - 1) - partStart;
-      reads.push({ kind: section.kind, index, offset: a, length: b - a + 1 });
+      const b = Math.min(hi, partStart + section.partSize - 1) - partStart;
+      // Only tile parts are spread over the shards. The leaf parts sit in shard
+      // 0 with the head and the metadata, because together they are 325 MB and
+      // far smaller than one tile shard.
+      const host =
+        section.kind === "tile" ? Math.floor(index / archive.tilePartsPerShard) : 0;
+      // A shard outside the table means the archive constants and the shard
+      // count disagree. Refuse rather than read the wrong host.
+      if (!(host >= 0) || host >= SHARD_COUNT) return null;
+      reads.push({ kind: section.kind, host, index, offset: a, length: b - a + 1 });
     }
   }
+
   // Every byte of the range must be covered, or the answer would be wrong.
   const covered = reads.reduce((sum, read) => sum + read.length, 0);
   if (covered !== end - start + 1) return null;
@@ -197,7 +237,7 @@ function planReads(start, end, archive) {
 }
 
 /**
- * Fetch one asset and cut out the requested bytes.
+ * Fetch one asset from its shard and cut out the requested bytes.
  *
  * Static Assets ignore the Range header, so this reads the whole part and
  * slices it. That read is the cost this design must budget for:
@@ -214,18 +254,18 @@ function planReads(start, end, archive) {
  *
  * Ceiling: a tile part read costs up to 2 MB of internal transfer to answer a
  * 200 byte tile. That is the price of Static Assets having no Range support.
- * The cost falls as the part size falls, and the file count rises. The chosen
- * point is TILE_SHARD in shard-pmtiles.py.
+ * The cost falls as the part size falls, and the file count rises. Measured at
+ * 2,000,000 B: a part read is 0.25 s from the edge with 0.11 s to first byte.
  */
-async function fetchPart(url, name, archive, read) {
+async function fetchPart(name, archive, read) {
   const file = read.kind === "head" || read.kind === "meta"
     ? `${read.kind}.bin`
     : `${read.kind}/${String(read.index).padStart(6, "0")}.bin`;
-  const target = `${url.origin}${ARCHIVE_PATH}${name}/${file}`;
+  const target = `${shardOrigin(read.host)}${ARCHIVE_PATH}${name}/${file}`;
 
   const response = await fetch(target);
   if (response.status !== 200) {
-    throw new Error(`${file} returned ${response.status}`);
+    throw new Error(`${file} on shard ${read.host} returned ${response.status}`);
   }
 
   const partSize = Number(response.headers.get("Content-Length") || "0");
@@ -351,3 +391,5 @@ function corsHeaders(request, extra) {
 
 // Keep the header size constant referenced so a reader can check it.
 export const HEAD_READ_BYTES = HEAD_BYTES;
+// Keep the shard count referenced so a reader can check it.
+export const SHARDS = SHARD_COUNT;

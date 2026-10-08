@@ -221,6 +221,58 @@ Two bugs the 27 shard tests caught:
   whole file would have written archive byte 0 into the wrong part. The stream
   start is now an explicit argument, and there is a test for it.
 
+## The reader Snippet
+
+`snippet.js` serves `tiles.jasontally.com/basemap.pmtiles` and routes each part
+read to the shard that holds it.
+
+Shard `k` owns tile parts `[k * 4864, (k+1) * 4864)`, so a tile part number
+gives its shard with one integer division:
+
+```js
+const host = Math.floor(index / archive.tilePartsPerShard);
+```
+
+The head, the metadata, and the leaf directories are on shard 0, because together
+they are 325 MB and far smaller than one tile shard.
+
+The Snippet rule is `http.host eq "tiles.jasontally.com"` and the asset paths
+contain no `.pmtiles`, so a subrequest to a shard host cannot re-enter the
+Snippet. That matters: if it could, every tile read would recurse.
+
+### Part size, measured
+
+Serving cost depends on the part size because the Snippet must stream from the
+start of a part to reach the answer. Measured live, cache warm, 202 byte tiles:
+
+| Offset in the part | End to end |
+|---|---|
+| 1,000 | 117 ms |
+| 1,000,000 | 133 ms |
+| 1,999,700 | 140 ms |
+
+The whole streaming overhead is about 23 ms, so the request is dominated by the
+round trip. A tile request is about 126 ms median.
+
+This bounds the value of smaller parts: the best case is about 18 %. The cost is
+the build, not the file limit. From 22 shard builds, upload cost is
+**90 s per GB plus 0.055 s per file**, so at 13 shards the byte term is 877 s
+whatever the part size is. Halving the parts adds about 270 s per build and
+pushes builds past the 30 minute wall that already killed one.
+
+So 2,000,000 B at 13 shards stays. Moving to 26 shards is the way to get both,
+and it is a separate piece of work.
+
+### Verification
+
+`verify-live.py` proves the deployed system, not the arithmetic. It compares the
+reader against each shard Worker and against the source archive.
+
+```sh
+python3 verify-live.py     # 27 checks, needs the network
+npm run test               # 85 offline checks
+```
+
 ## Wiring the shards, by API
 
 No dashboard work is needed. `wire-shards.mjs` does all of it for all 13 shards:

@@ -302,8 +302,21 @@ The CPU cost is roughly the bytes streamed. A median tile request streams about
 1 MB on average and at most 2 MB. At 64 KiB per chunk that is about 16 to 32
 chunks.
 
-**This is the main risk in the design and it must be measured.** Section 12,
-test 3 measures it on the live snippet.
+**Measured 2026-10-08 on the live snippet, cache warm, 202 byte tiles:**
+
+| Offset inside the part | Bytes streamed | End to end |
+|---|---|---|
+| 1,000 | about 0.001 MB | 117 ms |
+| 1,000,000 | about 1.0 MB | 133 ms |
+| 1,999,700 | about 2.0 MB | 140 ms |
+
+So the streaming overhead is about 23 ms across the whole 2 MB part, and the
+offset inside the part barely matters. The request cost is dominated by the round
+trip, not by the part size.
+
+This bounds what a smaller part size can buy. The best case is the 23 ms at the
+worst offset, about 18 % of a 126 ms request. That is why the design stays at
+2,000,000 B.
 
 ## 10. Why a Snippet and not a Worker
 
@@ -329,10 +342,19 @@ no change.
 
 ### 11.1 CPU time on a tile request
 
-Unmeasured. The budget is 5 ms. A tile request streams up to 2 MB. If test 3 in
-section 12 shows the time is too high, lower `TILE_SHARD`. Each halving of the
-part size roughly halves the read and doubles the file count. At 1,250,000 bytes
-the file count reaches about 103,000, which is over the limit.
+**Closed.** The snippet answered tile requests without error at every offset
+tested, across all 13 shards, and `verify-live.py` passes 27 checks against the
+live deployment. The streaming overhead measured in section 9 is about 23 ms.
+
+The 5 ms CPU budget was not read directly, because a Snippet is not a Worker and
+`wrangler tail` does not report Snippet timings. If that number is ever needed,
+move the same algorithm into a Worker, where the limits are 10,000 subrequests
+and 128 MB and the timings are visible.
+
+Lowering `TILE_SHARD` is still the fix if it ever matters. Each halving roughly
+halves the read and doubles the file count, and the file count is the limit, not
+the bytes. At 13 shards and 2,000,000 B the largest shard holds 6,897 files
+against a limit of 100,000.
 
 **If the part size cannot go lower and the CPU is too high, the section that
 holds 99.99 % of requests has no smaller unit available.** Then the answer is a
@@ -373,15 +395,21 @@ curl -s -H 'Range: bytes=0-16383' https://<host>/basemap.pmtiles -o head.bin
 cmp head.bin <(head -c 16384 archive.pmtiles) && echo MATCH
 ```
 
-**Test 3, CPU and memory.** This is the one that matters. Load the map in the
-Protomaps demo, then read the snippet timing.
+**Test 3, routing across the 13 shards.** This is the one that matters now.
+`verify-live.py` runs it:
 
 ```sh
-wrangler tail --format json
+python3 verify-live.py
 ```
 
-Watch for `cpuTime`. Record the value for a tile request. If it approaches
-5,000,000 microseconds, lower `TILE_SHARD` and rebuild.
+It asks the reader for bytes at known archive offsets in all 13 shards, asks the
+shard Worker that should hold those bytes directly, and compares. It also
+compares a leaf directory against the source archive, and checks the five answers
+the snippet must refuse. It passes 27 checks.
+
+Test 2 and this replace the earlier `wrangler tail` CPU measurement. A Snippet
+reports no timings, so the CPU budget cannot be read from the outside. See
+section 11.1.
 
 **Test 4, subrequest count.** Watch the network panel while loading a map view.
 A tile request must show exactly 1 request to `/s/basemap/tile/...`. A request

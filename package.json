@@ -18,6 +18,6 @@
     "deploy:assets-only": "npx wrangler deploy",
     "deploy:all": "node build.mjs all",
     "split": "python3 shard-pmtiles.py",
-    "verify": "python3 shard-pmtiles.py"
+    "verify": "python3 shard-pmtiles.py", "verify:live": "python3 verify-live.py"
   }
 }
