@@ -82,9 +82,8 @@ const MODULE_FILE = "snippet.js";
  * without it the browser refuses and the labels are simply missing. Same for the
  * styles themselves, which is why the page on this host already needed it.
  *
- * immutable on the fonts and the libraries: the file name or the pinned version
- * changes when the bytes do, so a long cache is safe and a revalidation round trip
- * is pure waste.
+ * immutable on the fonts: the path carries the codepoint range, so the bytes
+ * behind it never change and a revalidation round trip is pure waste.
  *
  * The sprites and the licences are not immutable, because they are named without a
  * version in them.
@@ -102,9 +101,6 @@ const HEADERS_FILE =
   "\tAccess-Control-Allow-Origin: *\n" +
   "/sprites/*\n" +
   "\tCache-Control: public, max-age=86400\n" +
-  "\tAccess-Control-Allow-Origin: *\n" +
-  "/vendor/*\n" +
-  "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   "/styles/*\n" +
   "\tAccess-Control-Allow-Origin: *\n";
@@ -785,7 +781,6 @@ function copyVendorAssets() {
   const trees = [
     [join(source, "fonts"), join(PUBLIC_DIR, "font")],
     [join(source, "sprites"), join(PUBLIC_DIR, "sprites")],
-    [join(source, "vendor"), join(PUBLIC_DIR, "vendor")],
   ];
   // The licences travel with the files they cover, at the path the files are
   // served from rather than the path they are kept at. Both allow redistribution

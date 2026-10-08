@@ -45,6 +45,8 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `snippet-rules.test.mjs` | Tests that the merge cannot drop another rule. |
 | `deploy-test.js` | Checks the deploy requests against a mock API. |
 | `tools/sync-reader.mjs` | Brings the reader's byte offsets in line with the live archive. |
+| `tools/fetch-assets.mjs` | Vendors the fonts and the sprites, and checks them by digest. |
+| `tools/bench-assets.mjs` | Measures this host against jsDelivr and the upstream assets site. |
 | `shard-repo/` | The template pushed to each of the 13 shard repos. |
 | `make-repos.mjs` | Creates the shard repos and pushes the template. |
 | `wire-shards.mjs` | Binds each shard repo to its Worker through the API. |

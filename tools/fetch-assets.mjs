@@ -69,22 +69,6 @@ const SPRITE_EXTS = ["json", "png"];
  * Licences, copied next to the assets they cover. Redistribution is allowed by
  * both, and both require the licence to travel with the files.
  */
-/**
- * The two libraries, vendored so the page and any map built from the documented
- * snippet can come from one hostname.
- *
- * Both BSD-3-Clause, which permits redistribution. Pinned rather than floating on
- * @5 and @3: a floating tag means the bytes under a URL change without the URL
- * changing, so nobody can serve them with a subresource integrity hash and nobody
- * can tell what they got. That cost is real and it is paid on purpose, and the
- * exact versions are recorded so an update is a deliberate act.
- */
-const VENDOR = [
-  { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js", to: "vendor/maplibre-gl.js" },
-  { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css", to: "vendor/maplibre-gl.css" },
-  { url: "https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js", to: "vendor/pmtiles.js" },
-];
-
 const LICENCES = [
   {
     // raw.githubusercontent, not the pages site: the licence is in the repo but is
@@ -97,16 +81,6 @@ const LICENCES = [
     from: "https://raw.githubusercontent.com/tangrams/icons/master/LICENSE.md",
     to: "assets/sprites/LICENSE.md",
     note: "MIT, covers the icons the sprites are built from",
-  },
-  {
-    from: "https://raw.githubusercontent.com/maplibre/maplibre-gl-js/main/LICENSE.txt",
-    to: "assets/vendor/maplibre-gl-LICENSE.txt",
-    note: "BSD-3-Clause, covers maplibre-gl.js and maplibre-gl.css",
-  },
-  {
-    from: "https://raw.githubusercontent.com/protomaps/PMTiles/main/LICENSE",
-    to: "assets/vendor/pmtiles-LICENSE.txt",
-    note: "BSD-3-Clause, covers pmtiles.js",
   },
 ];
 
@@ -127,7 +101,6 @@ function wanted() {
       files.push(`${dir}/${start}-${start + 255}.pbf`);
     }
   }
-  for (const file of VENDOR) files.push(file.to);
   for (const flavor of SPRITES) {
     for (const suffix of SPRITE_SUFFIXES) {
       for (const ext of SPRITE_EXTS) {
@@ -225,10 +198,8 @@ async function main() {
   }
 
   let fetched = 0;
-  // The vendor files come from the npm CDN, the rest from the assets site.
-  const vendorUrl = new Map(VENDOR.map((f) => [f.to, f.url]));
   for (const relative of missing) {
-    const url = vendorUrl.get(relative) || `${SOURCE}/${relative}`;
+    const url = `${SOURCE}/${relative}`;
     const bytes = await fetchText(url);
     const path = join(ASSETS, relative);
     mkdirSync(dirname(path), { recursive: true });
@@ -254,7 +225,11 @@ async function main() {
     known.set(relative, digestOf(join(ASSETS, relative)));
   }
 
+  // Only files that are actually there. A digest for a deleted asset would keep
+  // the manifest claiming to cover it, and the next run would report a missing
+  // file that no longer exists in wanted() at all.
   const manifestLines = [...known.entries()]
+    .filter(([relative]) => existsSync(join(ASSETS, relative)))
     .sort(([a], [b]) => (a < b ? -1 : 1))
     .map(([relative, digest]) => `${digest}  ${relative}`);
   if (manifestLines.length) {

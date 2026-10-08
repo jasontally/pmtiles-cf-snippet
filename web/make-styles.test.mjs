@@ -506,21 +506,26 @@ await check("a toggle says which zoom it starts at, and that is true", () => {
   assert.ok(page.includes("Zoom in to see them disappear"), "the page does not explain a no visible change");
 });
 
-await check("the vendored libraries are pinned with a matching integrity hash", () => {
-  // A wrong hash does not degrade, it blocks: the script never runs and the map
-  // never appears, with an error most visitors will not read. So the hash in the
-  // page is recomputed from the file rather than trusted.
+await check("the libraries are pinned to a version with an integrity hash", async () => {
+  // A wrong hash does not degrade, it blocks: the script never runs, the map never
+  // appears, and the error most visitors will never read. So the digest in the page
+  // is recomputed from the bytes the CDN serves, not trusted.
+  //
+  // Pinned, not floating. With @5 the bytes under a URL can change without the URL
+  // changing, and an integrity hash is then impossible, which is what let this page
+  // ship without one for so long.
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   const tags = [...page.matchAll(
-    /(?:href|src)="\/vendor\/([A-Za-z0-9._-]+)"\s*\n\s*integrity="([^"]+)"/g
+    /(?:href|src)="(https:\/\/cdn\.jsdelivr\.net\/npm\/[^"]+@([\d.]+)\/[^"]+)"\s*\n\s*integrity="([^"]+)"/g
   )];
-  assert.equal(tags.length, 3, `expected 3 pinned tags, found ${tags.length}`);
-  assert.ok(!/cdn\.jsdelivr\.net\/npm\/(maplibre-gl|pmtiles)/.test(page),
-    "a script tag still points at the package CDN");
-  for (const [, name, integrity] of tags) {
-    const bytes = readFileSync(join(HERE, "..", "assets", "vendor", name));
+  assert.equal(tags.length, 3, `expected 3 pinned CDN tags, found ${tags.length}`);
+  assert.ok(!/@\d+\/dist\//.test(page.replace(/@[\d.]+\//g, "@")), "a tag uses a floating version");
+  for (const [, url, version, integrity] of tags) {
+    const response = await fetch(url);
+    assert.equal(response.status, 200, `${url} returned ${response.status}`);
+    const bytes = Buffer.from(await response.arrayBuffer());
     const digest = "sha384-" + createHash("sha384").update(bytes).digest("base64");
-    assert.equal(integrity, digest, `${name} has the wrong integrity hash`);
+    assert.equal(integrity, digest, `${url} is pinned at ${version} but the hash is for other bytes`);
   }
 });
 

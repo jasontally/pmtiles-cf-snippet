@@ -119,11 +119,23 @@ await check("both licences are present and say what they cover", () => {
   assert.ok(/Version 1\.1/.test(ofl), "the OFL is not version 1.1");
   const mit = readFileSync(join(ROOT, "assets", "sprites", "LICENSE.md"), "utf8");
   assert.ok(/MIT/i.test(mit), "the sprite licence is not MIT");
-  // Both libraries are BSD-3-Clause.
-  const maplibre = readFileSync(join(ROOT, "assets", "vendor", "maplibre-gl-LICENSE.txt"), "utf8");
-  assert.ok(/Redistribution and use in source and binary forms/.test(maplibre), "maplibre licence is not BSD-3-Clause");
-  const pmtiles = readFileSync(join(ROOT, "assets", "vendor", "pmtiles-LICENSE.txt"), "utf8");
-  assert.ok(/BSD/.test(pmtiles), "pmtiles licence is not BSD");
+});
+
+await check("the libraries are not vendored, because they measured slower here", () => {
+  // They were. They were served from this host, measured against jsDelivr three
+  // times, and jsDelivr won by between 1.15 and 1.67 times, so they went back. The
+  // files are gone rather than left in the repo unused, because an asset tree that
+  // is never served and never updated is a thing people trust by mistake.
+  assert.ok(!existsSync(join(ROOT, "assets", "vendor")), "assets/vendor still exists");
+  assert.ok(!existsSync(join(ROOT, "public", "vendor")), "public/vendor still exists");
+  const page = readFileSync(join(ROOT, "web", "index.html"), "utf8");
+  assert.ok(!page.includes("/vendor/"), "the page still points a script at /vendor/");
+  const headers = readFileSync(join(ROOT, "public", "_headers"), "utf8");
+  assert.ok(!headers.includes("/vendor/"), "_headers still has a rule for /vendor/");
+  // And the manifest must not keep claiming to cover them.
+  for (const relative of manifest.keys()) {
+    assert.ok(!relative.startsWith("vendor/"), `${relative} is in the manifest but nothing vendors it`);
+  }
 });
 
 await check("the build publishes the fonts where the styles look for them", () => {
@@ -133,8 +145,6 @@ await check("the build publishes the fonts where the styles look for them", () =
   assert.ok(existsSync(join(ROOT, "public", "font", "OFL.txt")), "the OFL is not published with the fonts");
   assert.ok(existsSync(join(ROOT, "public", "sprites", "v4", "light.json")), "no sprite published");
   assert.ok(existsSync(join(ROOT, "public", "sprites", "LICENSE.md")), "the sprite licence is not published");
-  assert.ok(existsSync(join(ROOT, "public", "vendor", "maplibre-gl.js")), "maplibre-gl.js is not published");
-  assert.ok(existsSync(join(ROOT, "public", "vendor", "pmtiles.js")), "pmtiles.js is not published");
 });
 
 await check("the internal manifest is not published", () => {
@@ -157,17 +167,6 @@ await check("the internal manifest is not published", () => {
   );
 });
 
-await check("the vendored libraries match the pinned versions they claim", () => {
-  // A vendored file that drifts from the version in the path is how you end up
-  // serving something you did not test.
-  for (const name of ["maplibre-gl.js", "maplibre-gl.css", "pmtiles.js"]) {
-    const bytes = readFileSync(join(ROOT, "assets", "vendor", name));
-    const recorded = manifest.get(`vendor/${name}`);
-    assert.ok(recorded, `${name} has no digest`);
-    assert.equal(bytes.length > 1000, true, `${name} is suspiciously small`);
-  }
-});
-
 await check("every path a browser fetches cross-origin sends CORS headers", () => {
   // A style hosted anywhere asks this host for a font range. Without
   // Access-Control-Allow-Origin the browser refuses and the labels are missing with
@@ -179,7 +178,7 @@ await check("every path a browser fetches cross-origin sends CORS headers", () =
     if (line && !/^\s/.test(line)) path = line.trim();
     else if (path && /Access-Control-Allow-Origin/.test(line)) blocks[path] = true;
   }
-  for (const p of ["/s/*", "/font/*", "/sprites/*", "/vendor/*", "/styles/*"]) {
+  for (const p of ["/s/*", "/font/*", "/sprites/*", "/styles/*"]) {
     assert.ok(blocks[p], `no CORS header for ${p}`);
   }
   // The font rules must not be immutable, or a licence update would never reach a

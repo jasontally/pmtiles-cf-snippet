@@ -7,21 +7,27 @@
 <meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee.">
 
 <!--
-  The two libraries, from here, pinned and with a subresource integrity hash.
+  The two libraries, from jsDelivr, at a pinned version, with an integrity hash.
 
-  They used to come from cdn.jsdelivr.net on a floating @5 and @3, which meant
-  the bytes under a given URL could change with no change to the URL: no integrity
-  hash is possible against that, and somebody copying the example further down
-  could not say what they were loading. Both are BSD-3-Clause and both licences are
-  at /vendor/. tools/bench-assets.mjs measures this host against jsDelivr and prints
-  whether it is actually faster, so the choice can be revisited with a number
-  rather than a hunch.
+  They were vendored here and served from this host first. Measuring the two
+  against each other, three times, said jsDelivr is between 1.15 and 1.67 times
+  faster on a warm request, so they stayed on the CDN. tools/bench-assets.mjs is
+  that measurement, and re-running it is one command, so this is a decision with a
+  number behind it rather than a habit. If you would rather have one hostname and
+  no third party, point these three at this host instead; the files are the same.
+
+  What did change is the version. A floating @5 or @3 means the bytes under a URL
+  can change with no change to the URL, so no integrity hash is possible against it
+  and nobody can say what they loaded. Pinned plus integrity gives both.
+
+  The fonts and sprites are a different answer and are served from here. See the
+  Fonts and sprites section below for why.
 -->
-<link rel="stylesheet" href="/vendor/maplibre-gl.css"
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"
       integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
-<script src="/vendor/maplibre-gl.js"
+<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"
         integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
-<script src="/vendor/pmtiles.js"
+<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
         integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
 
 <style>
@@ -258,10 +264,9 @@
   <h3>One. Put a map on the page</h3>
   <p>
     Copy this file. It is the whole example: three script tags, one style URL, one
-    map. The libraries come from here too, so the whole map is one hostname and
-    nothing you depend on belongs to a package CDN. Both are BSD-3-Clause, and if
-    you would rather use jsDelivr or unpkg, swap the three URLs for the CDN ones:
-    they are the same files.
+    map. The two libraries are pinned to a version, and both are BSD-3-Clause, so
+    you can put them on your own host if you would rather: the URLs are all of
+    jsDelivr's, and the files are the same ones either way.
   </p>
 <pre><code>&lt;!doctype html&gt;
 &lt;html&gt;
@@ -269,9 +274,9 @@
   &lt;meta charset="utf-8"&gt;
   &lt;meta name="viewport" content="width=device-width, initial-scale=1"&gt;
   &lt;title&gt;Basemap&lt;/title&gt;
-  &lt;link rel="stylesheet" href="https://tiles.jasontally.com/vendor/maplibre-gl.css"&gt;
-  &lt;script src="https://tiles.jasontally.com/vendor/maplibre-gl.js"&gt;&lt;/script&gt;
-  &lt;script src="https://tiles.jasontally.com/vendor/pmtiles.js"&gt;&lt;/script&gt;
+  &lt;link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"&gt;
+  &lt;script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"&gt;&lt;/script&gt;
+  &lt;script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"&gt;&lt;/script&gt;
   &lt;style&gt;html, body, #map { margin: 0; height: 100%; }&lt;/style&gt;
 &lt;/head&gt;
 &lt;body&gt;
@@ -367,6 +372,17 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     be drawn for it. Protomaps' own styles use <code>Noto Sans Medium</code> for
     bold text; there is no <code>Noto Sans Bold</code> in this set, which is why a
     style that asks for one silently loses every label.
+  </p>
+  <p class="note">
+    <strong>Why the fonts are here and the libraries are not.</strong> All of it was
+    measured rather than assumed, three runs of nine requests each, against jsDelivr
+    and against the upstream assets site, from one machine on one network. jsDelivr
+    was 1.15 to 1.67 times faster on MapLibre and PMTiles, so those two stay on the
+    CDN. For the fonts the two were the same inside the noise, and this host caches
+    them for a year against upstream's ten minutes, so they are served from here
+    along with the sprites. Those numbers are one reader's view; the fonts are also
+    the case where depending on somebody else's uptime matters most, since a glyph
+    server that is down is a map with no labels.
   </p>
 
   <h3>Four. About Leaflet</h3>
