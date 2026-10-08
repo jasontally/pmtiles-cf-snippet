@@ -16,3 +16,6 @@ node_modules/
 __pycache__/
 *.pyc
 .DS_Store
+
+# Browser test artefacts from the MCP playwright server.
+.playwright-mcp/

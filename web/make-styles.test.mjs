@@ -324,6 +324,13 @@ await check("the page links the tiles URL the styles use", () => {
   for (const leak of ["snippet", "Snippet", "Static Assets", "wrangler", "Wrangler", "shard", "part file"]) {
     assert.ok(!page.includes(leak), `the page mentions ${leak}`);
   }
+  // The refresh section has to say when, and must not promise an instant swap.
+  assert.ok(page.includes("Refreshed on Sundays"), "the page does not say when it refreshes");
+  assert.ok(/00:30 and\s+07:00 UTC/.test(page), "the page does not give the refresh window");
+  assert.ok(
+    page.includes("Archive metadata"),
+    "the page should point at the archive's own metadata rather than a hard coded date"
+  );
 });
 
 console.log(`${passed} passed, ${failed} failed`);

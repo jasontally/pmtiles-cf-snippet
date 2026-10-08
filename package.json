@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Serve a 118 GiB PMTiles archive from Cloudflare Static Assets with a Snippet",
   "scripts": {
-    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js && node web/make-styles.test.mjs",
+    "test": "python3 shard-pmtiles.py --selftest && node --test snippet-rules.test.mjs && node snippet-test.js && node minify-test.js && node deploy-test.js && node web/make-styles.test.mjs && node tools/refresh-tiles.test.mjs",
     "test:rules": "node --test snippet-rules.test.mjs",
     "test:split": "python3 shard-pmtiles.py --selftest",
     "test:snippet": "node snippet-test.js",
@@ -21,6 +21,11 @@
     "verify": "python3 shard-pmtiles.py",
     "verify:live": "python3 verify-live.py",
     "test:styles": "node web/make-styles.test.mjs",
-    "styles": "node web/make-styles.mjs"
+    "styles": "node web/make-styles.mjs",
+    "test:refresh": "node tools/refresh-tiles.test.mjs",
+    "refresh": "node tools/refresh-tiles.mjs",
+    "refresh:plan": "node tools/refresh-tiles.mjs --plan",
+    "refresh:report": "node tools/refresh-tiles.mjs --report",
+    "refresh:layout": "node tools/refresh-tiles.mjs --layout"
   }
 }

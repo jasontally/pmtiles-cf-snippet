@@ -360,6 +360,38 @@ console.log(tile.data.byteLength);</code></pre>
   </ul>
 </section>
 
+<section id="freshness">
+  <h2>How fresh is this?</h2>
+  <p class="sub">The tiles are a copy of the Protomaps Basemap, refreshed weekly.</p>
+
+  <ul>
+    <li>
+      <strong>Refreshed on Sundays.</strong> The copy is rebuilt between 00:30 and
+      07:00 UTC. That is the only window in which the upstream project has never
+      published in three years of release history, so a refresh is not competing
+      with a new upstream build halfway through.
+    </li>
+    <li>
+      <strong>Which upstream build is in use right now?</strong> Use the
+      <strong>Archive metadata</strong> button at the top of this page. It reads
+      the archive's own header, so the answer is always current rather than
+      something this page could have gone stale about.
+    </li>
+    <li>
+      <strong>A refresh is not instantaneous.</strong> It is thirteen separate
+      rebuilds spread over about six and a half hours, one at a time. For most of
+      that window the copy is a mix of two upstream builds. A tile you request
+      during it may come from the newer build rather than the one the reader
+      advertised, which shows as a tile from the wrong place, not as a broken
+      map.
+    </li>
+    <li>
+      <strong>A refresh can be missed.</strong> It is a best-effort job, not a
+      guarantee. If it fails, the previous build keeps serving.
+    </li>
+  </ul>
+</section>
+
 <footer>
   Tiles: <a href="https://github.com/protomaps/basemaps">Protomaps Basemap</a>, derived from
   <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors.

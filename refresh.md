@@ -68,11 +68,21 @@ Six and a half hours fits 13 slots at 30 minutes, which is exactly the number of
 shards. That is the whole reason for the 30 minute interval and the 6 to 7 hour
 window.
 
-Chosen: **Sunday, 00:30 to 07:00 UTC**, thirteen refresh slots and a final slot to
-update the reader. Sunday because it is tied quietest by weekday with Saturday,
-one release in 159 weeks, and that one was at 08:52 UTC, well clear of the
-window. As local time this is Saturday evening to Sunday early morning in the
-Americas.
+Chosen: **Sunday, 00:30 to 07:30 UTC**. That is 14 half hour slots: twelve
+refresh shards 1 to 12, one refreshes shard 0 at 06:30, and the last updates the
+reader at 07:00. Sunday because it is tied quietest by weekday with Saturday, one
+release in 159 weeks, and that one was at 08:52 UTC, well clear of the window. As
+local time this is Saturday evening to Sunday early morning in the Americas.
+
+The window gates **starting a shard build**. Updating the reader is not gated,
+because it reads the header from our own shard 0 rather than from Protomaps, so
+it carries no risk of racing an upstream publish. The workflow therefore also runs
+on Monday, which gives a long tail for a shard 0 that built slowly. Without the
+fourteenth slot the reader would wait a week for its offsets.
+
+The 4 hour minimum age on a Protomaps build matters more than the window. A build
+is listed before it is finished being written, and a short read would produce a
+corrupt archive that looks fine until someone reads a tile from the wrong place.
 
 ## How a refresh runs
 
@@ -96,6 +106,17 @@ The target build is pinned once per cycle and written to `data/refresh.json`. If
 newer Protomaps build appears mid-window the cycle keeps using the pinned one, so
 every shard ends up on the same bytes. That is the guarantee the quiet window
 cannot give on its own.
+
+## Builds get longer as the archive grows
+
+Upload cost is 90 s per GB plus 0.055 s per file. The archive is now 138.7 GB, not
+the 118 GiB it was when the shard count was chosen, so a shard build is about
+10.5 GB and roughly 7,300 files.
+
+That puts a single build near 25 minutes. One of 22 builds was terminated at 31
+minutes when six ran together, so the margin is thin and it will get thinner. This
+is the strongest argument yet for the two generation layout below: refreshing half
+the Workers a week halves the bytes in each build.
 
 ## The transitional window, stated plainly
 
