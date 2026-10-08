@@ -338,5 +338,68 @@ await check("the page links the tiles URL the styles use", () => {
   assert.ok(/weekly|week/i.test(page), "the page does not give a staleness scale");
 });
 
+await check("the page opens on the style the build names as the default", () => {
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  const index = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "index.json"), "utf8"));
+  // One source of truth. If the page picked flavors[0] instead, changing the
+  // default in the build would silently do nothing, and the two would disagree
+  // about which style a visitor sees.
+  assert.ok(index.defaultFlavor, "index.json does not name a default flavour");
+  assert.ok(
+    index.flavors.some((f) => f.id === index.defaultFlavor),
+    `defaultFlavor ${index.defaultFlavor} is not one of the flavours`
+  );
+  assert.ok(
+    page.includes("index.defaultFlavor"),
+    "the page ignores the default flavour and picks its own"
+  );
+  assert.ok(!page.includes("current = flavors[0]"), "the page still opens on the first flavour");
+  assert.equal(index.defaultFlavor, "bright", "the default is meant to be Bright");
+});
+
+await check("the builder sits with the map and edits that same map", () => {
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  const tryAt = page.indexOf('<section id="try">');
+  const useAt = page.indexOf('<section id="use">');
+  const builderAt = page.indexOf('id="builder"');
+  const mapAt = page.indexOf('id="map"');
+  assert.ok(tryAt > 0 && useAt > tryAt, "the Try it section is missing");
+  // Between the map and the Use it section, in that order. That one placement is
+  // what puts the builder beside the map on a wide screen and under it on a
+  // narrow one, without two copies of the controls.
+  assert.ok(mapAt > tryAt && mapAt < builderAt, "the builder is not after the map");
+  assert.ok(builderAt < useAt, "the builder is not before Use it");
+  assert.equal(page.indexOf('id="builder"'), page.lastIndexOf('id="builder"'), "the builder is duplicated");
+  // The builder must drive the live map, not a second map or a preview.
+  assert.ok(/map\.setStyle\(style\)/.test(page), "the builder does not push its style to the map");
+  assert.ok(!/id="map2"|id="preview-map"/.test(page), "there is a second map on the page");
+  // Both sets of flavour buttons must be the same action, or the map and the
+  // controls can disagree about which style is showing.
+  const callSites = page.match(/addEventListener\("click", \(\) => selectFlavor\(flavor\)\)/g) || [];
+  assert.equal(
+    callSites.length,
+    2,
+    `expected 2 click handlers on selectFlavor, found ${callSites.length}`
+  );
+});
+
+await check("the map centres on where the visitor is, and copes when it cannot", () => {
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(page.includes("https://latlon.jasontally.com/"), "the page does not ask for a location");
+  // Latitude first in the answer, longitude first in a MapLibre centre. Swapping
+  // them puts the map in the wrong hemisphere and it is not obvious by eye.
+  assert.ok(/\[lat, lon\] = .*split\(","\)/.test(page), "the page does not read lat then lon");
+  assert.ok(/center: \[lon, lat\]/.test(page), "the page does not swap into MapLibre order");
+  // There has to be a fallback and a time limit, or one slow request holds the
+  // whole page.
+  assert.ok(/abort\(\)/.test(page), "the location request cannot be given up on");
+  assert.ok(/catch \{/.test(page) || /catch\s*\(/.test(page), "a failed location is not handled");
+  assert.ok(/zoom: 2\.4/.test(page), "there is no whole world fallback zoom");
+  // Only the live map matters here. The worked example further down the page is
+  // allowed to name a city, because that is the point of the example.
+  const script = page.slice(page.indexOf('<script type="module">'));
+  assert.ok(!/center: \[2\.35, 48\.85\]/.test(script), "the live map still opens on a hard coded city");
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

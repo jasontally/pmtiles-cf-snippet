@@ -622,6 +622,11 @@ function main() {
   const index = {
     tiles: TILES_URL,
     schema: SCHEMA,
+    // Which style the page opens with. Stated here rather than in the page, so
+    // changing it is one edit and the page cannot disagree with the build.
+    // Bright is the one to lead with: it reads clearly on a screen and is the
+    // least opinionated of the three.
+    defaultFlavor: "bright",
     flavors: Object.entries(FLAVORS).map(([id, p]) => ({
       id,
       label: p.name,
@@ -630,6 +635,9 @@ function main() {
       style: `/styles/${id}.json`,
     })),
   };
+  if (!FLAVORS[index.defaultFlavor]) {
+    throw new Error(`defaultFlavor ${index.defaultFlavor} is not one of the flavours`);
+  }
   writeFileSync(join(OUT, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
 
   for (const flavor of Object.keys(FLAVORS)) {

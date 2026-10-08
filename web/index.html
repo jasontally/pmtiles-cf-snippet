@@ -65,7 +65,12 @@
 
   /* map */
   #map { position: relative; height: min(66vh, 34rem); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
-  .flavors { position: absolute; top: .6rem; left: .6rem; z-index: 2; display: flex; gap: .3rem; }
+  /* One bar holding both sets of buttons. They used to be pinned to opposite
+     corners, which collided as soon as the map got narrower than the sum of the
+     two. Flex with wrap is the fix: they share a row when there is room and the
+     tools drop to a second row when there is not. */
+  .mapbar { position: absolute; top: .6rem; left: .6rem; right: .6rem; z-index: 2; display: flex; flex-wrap: wrap; gap: .3rem; }
+  .flavors { display: flex; gap: .3rem; }
   .flavors button {
     display: flex; align-items: center; gap: .4rem; font: inherit; font-size: .85rem;
     padding: .35rem .7rem; border-radius: 999px; cursor: pointer;
@@ -74,7 +79,7 @@
   }
   .flavors button[aria-pressed="true"] { background: #24231f; color: #fff; border-color: #24231f; }
   .flavors .dot { width: .7rem; height: .7rem; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); }
-  .tools { position: absolute; top: .6rem; right: .6rem; z-index: 2; display: flex; gap: .3rem; }
+  .tools { display: flex; gap: .3rem; margin-left: auto; }
   .tools button {
     font: inherit; font-size: .85rem; padding: .35rem .7rem; border-radius: 999px; cursor: pointer;
     background: rgba(255,255,255,.94); color: #24231f; border: 1px solid rgba(0,0,0,.12);
@@ -83,9 +88,21 @@
   .maphint { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
     font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
 
+  /* The map and the builder, side by side when there is room for both.
+     Sticky on the map so a colour change is something you watch happen: without
+     it, the map scrolls out of view while the controls are still on screen. */
+  .try-grid { display: grid; gap: 1.25rem; grid-template-columns: 1fr; align-items: start; }
+  @media (min-width: 62rem) {
+    .try-grid { grid-template-columns: minmax(0, 1.3fr) minmax(0, 1fr); }
+    .try-map { position: sticky; top: .75rem; }
+    /* Taller when it has a neighbour. The builder is a long column of controls and
+       the map beside it should be worth looking at, not a stamp. */
+    #map { height: min(76vh, 44rem); }
+  }
+
   /* builder */
-  .builder { display: grid; gap: 1.25rem; grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr); align-items: start; }
-  @media (max-width: 52rem) { .builder { grid-template-columns: 1fr; } }
+  .builder-panel h3 { margin: 0 0 .35rem; }
+  .builder-panel .builder-note { color: var(--muted); margin: 0 0 1rem; font-size: .92rem; }
   .builder-controls { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 1rem 1.1rem; }
   .builder-row { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; padding: .4rem 0; }
   .builder-label { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); min-width: 5.5rem; }
@@ -150,22 +167,70 @@
   <ul class="facts">
     <li><b>No API key</b><span>Nothing to sign up for, no token in your code.</span></li>
     <li><b>No rate limit</b><span>No throttling, no quota, no burst cap.</span></li>
-    <li><b>No SLA</b><span>Best effort only. See what that means below.</span></li>
+    <li><b>Faster with use</b><span>Tile parts are cached at the edge, so a place that gets looked at often gets quicker.</span></li>
     <li><b>Zoom 0 to 15</b><span>Vector tiles, gzip, 118&nbsp;GiB of archive.</span></li>
   </ul>
 </header>
 
 <section id="try">
   <h2>Try it</h2>
-  <p class="sub">The same archive in three styles. Switching style keeps the tiles already loaded, so it is instant.</p>
+  <p class="sub">
+    The same archive in three styles. Change the style and the tiles already
+    loaded stay put, so it is instant.
+  </p>
 
-  <div id="map">
-    <div class="flavors" id="flavors" role="group" aria-label="Style"></div>
-    <div class="tools">
-      <button type="button" id="show-style">Style JSON</button>
-      <button type="button" id="show-meta">Archive metadata</button>
+  <!-- The builder is in this section rather than in one of its own because it
+       edits the map above it. On a wide screen the two sit side by side, and the
+       map stays put while the controls scroll, so a colour change is something
+       you watch happen. On a narrow screen the builder stacks under the map. -->
+  <div class="try-grid">
+    <div class="try-map">
+      <div id="map">
+        <div class="mapbar">
+          <div class="flavors" id="flavors" role="group" aria-label="Style"></div>
+          <div class="tools">
+            <button type="button" id="show-style">Style JSON</button>
+            <button type="button" id="show-meta">Archive metadata</button>
+          </div>
+        </div>
+        <span class="maphint" id="maphint">loading tiles…</span>
+      </div>
     </div>
-    <span class="maphint" id="maphint">loading tiles…</span>
+
+    <div id="builder" class="builder-panel">
+      <h3>Make your own</h3>
+      <p class="builder-note">
+        Change a colour or switch a layer off and the map updates as you go. Then
+        copy the style JSON, which is a normal MapLibre style you can host
+        yourself. It points at these tiles, so it keeps working wherever you put
+        it.
+      </p>
+
+      <div class="builder-controls">
+        <div class="builder-row">
+          <span class="builder-label">Start from</span>
+          <span id="builder-flavors" class="builder-flavors"></span>
+        </div>
+        <div class="builder-row">
+          <span class="builder-label">Layers</span>
+          <span id="builder-toggles" class="builder-toggles"></span>
+        </div>
+        <div id="builder-colors"></div>
+        <div class="builder-actions">
+          <button type="button" id="builder-copy">Copy style JSON</button>
+          <button type="button" id="builder-download">Download</button>
+          <button type="button" id="builder-share">Copy share link</button>
+          <button type="button" id="builder-reset">Reset</button>
+          <span id="builder-status" class="builder-status"></span>
+        </div>
+      </div>
+
+      <details class="builder-side">
+        <summary>Style JSON</summary>
+        <pre id="builder-json"></pre>
+      </details>
+      <div class="builder-status" id="builder-note"></div>
+    </div>
   </div>
 </section>
 
@@ -282,43 +347,6 @@ console.log(tile.data.byteLength);</code></pre>
       <thead><tr><th>Style</th><th>Looks like</th><th>File</th></tr></thead>
       <tbody id="style-rows"></tbody>
     </table>
-  </div>
-</section>
-
-<section id="builder">
-  <h2>Make your own</h2>
-  <p class="sub">
-    Change a colour or switch a layer off and the map updates. Then copy the style
-    JSON, which is a normal MapLibre style you can host yourself. It points at
-    these tiles, so it keeps working wherever you put it.
-  </p>
-
-  <div class="builder">
-    <div class="builder-controls">
-      <div class="builder-row">
-        <span class="builder-label">Start from</span>
-        <span id="builder-flavors" class="builder-flavors"></span>
-      </div>
-      <div class="builder-row">
-        <span class="builder-label">Layers</span>
-        <span id="builder-toggles" class="builder-toggles"></span>
-      </div>
-      <div id="builder-colors"></div>
-      <div class="builder-actions">
-        <button type="button" id="builder-copy">Copy style JSON</button>
-        <button type="button" id="builder-download">Download</button>
-        <button type="button" id="builder-share">Copy share link</button>
-        <button type="button" id="builder-reset">Reset</button>
-        <span id="builder-status" class="builder-status"></span>
-      </div>
-    </div>
-    <div class="builder-side">
-      <div class="builder-note" id="builder-note"></div>
-      <details>
-        <summary>Style JSON</summary>
-        <pre id="builder-json"></pre>
-      </details>
-    </div>
   </div>
 </section>
 
@@ -445,7 +473,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   async function boot() {
     const index = await (await fetch("styles/index.json")).json();
     flavors = index.flavors;
-    current = flavors[0];
+    // The build says which style to open with, so there is one answer and not two
+    // that can drift apart.
+    current = flavors.find((f) => f.id === index.defaultFlavor) || flavors[0];
 
     // flavour buttons
     $("flavors").innerHTML = "";
@@ -468,6 +498,10 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       f.url + '</a></td></tr>'
     ).join("");
 
+    // Where to look. Asked for before the map is built, so the first tiles are
+    // the right ones rather than the ones that get thrown away a moment later.
+    const place = await where();
+
     // the map
     const protocol = new pmtiles.Protocol();
     maplibregl.addProtocol("pmtiles", protocol.tile);
@@ -475,20 +509,58 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     map = new maplibregl.Map({
       container: "map",
       style: current.url,
-      center: [2.35, 48.85],
-      zoom: 4.2,
+      center: place.center,
+      zoom: place.zoom,
       attributionControl: false
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
 
     const failed = countSourceEvents(map);
     map.on("idle", () => {
-      if (failed() === 0) setHint("tiles from tiles.jasontally.com");
-      else setHint(failed() + " tile request(s) failed, see the browser console");
+      if (failed() === 0) {
+        setHint("tiles from tiles.jasontally.com" + (place.approximate ? " · near " + place.label : ""));
+      } else setHint(failed() + " tile request(s) failed, see the browser console");
     });
 
     loadSchema();
     await loadBuilder();
+  }
+
+  /**
+   * Roughly where the visitor is, so the map opens on something they know rather
+   * than on wherever the author happened to live.
+   *
+   * latlon.jasontally.com answers with a latitude and a longitude and nothing
+   * else, and it sends CORS headers, so this needs no key and no third party.
+   * It is coarse: the answer is a city, not a building.
+   *
+   * If it does not answer, or answers slowly, the map opens on the whole world
+   * instead. Waiting is capped, because a page that hangs on one small request
+   * to show a map is worse than a map of the world.
+   */
+  async function where() {
+    const WORLD = { center: [0, 18], zoom: 2.4, approximate: false, label: "" };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2500);
+    try {
+      const response = await fetch("https://latlon.jasontally.com/", { signal: controller.signal });
+      if (!response.ok) return WORLD;
+      // "28.2061,-80.685". Latitude first, which is the reverse of a MapLibre
+      // centre, so a straight swap would put the map in the wrong hemisphere.
+      const [lat, lon] = (await response.text()).split(",").map(Number);
+      if (!Number.isFinite(lat) || !Number.isFinite(lon)) return WORLD;
+      if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return WORLD;
+      return {
+        center: [lon, lat],
+        zoom: 5,
+        approximate: true,
+        label: `${Math.abs(lat).toFixed(2)}°, ${Math.abs(lon).toFixed(2)}°`,
+      };
+    } catch {
+      return WORLD;
+    } finally {
+      clearTimeout(timer);
+    }
   }
 
   function selectFlavor(flavor) {
@@ -530,10 +602,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   async function loadBuilder() {
     builder.data = await (await fetch("styles/builder.json")).json();
     buildBuilderUi();
-    // A flavour must be chosen before anything reads the palette. The colour
-    // inputs are built first because setFlavorPalette fills them, and the shared
-    // link is applied on top of that default.
-    setFlavorPalette(flavors[0].id);
+    // The builder must open on the same flavour the map is showing, or the map
+    // would change style behind the visitor as the page finishes loading.
+    setFlavorPalette(current.id);
     applyHash();
     apply();
   }
@@ -597,7 +668,11 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       button.type = "button";
       button.dataset.id = flavor.id;
       button.textContent = flavor.label;
-      button.addEventListener("click", () => setFlavorPalette(flavor.id) || apply());
+      // The same action as the buttons over the map. Both sets exist because one is
+      // where the eye already is and the other is where the controls are, so they
+      // must not be two different things: going through selectFlavor keeps the
+      // palette, the map, and the buttons over the map all saying the same thing.
+      button.addEventListener("click", () => selectFlavor(flavor));
       $("builder-flavors").appendChild(button);
     }
 
