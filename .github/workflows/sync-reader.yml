@@ -1,0 +1,64 @@
+name: Sync reader offsets
+
+# After the shard refresh window, check that the reader still describes the
+# archive the shards hold, and commit the difference if not.
+#
+# This holds no credentials and needs none. The archive header is read over plain
+# HTTP from shard 0, which serves assets without a token. Only this repo's build,
+# on Cloudflare, ever holds one.
+#
+# It runs three times on Sunday and once on Monday. It is safe to run often and
+# often wrong: until shard 0 has been rebuilt the header is still the old one, the
+# offsets still agree, and this correctly does nothing. The Monday run is there
+# for a shard 0 that built slowly on Sunday.
+on:
+  schedule:
+    - cron: '7 7,10 * * 0'
+    - cron: '7 7 * * 1'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: sync-reader
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Check the reader against the live archive
+        run: node tools/sync-reader.mjs
+
+      # A change here is the byte offsets in snippet.js. Committing it is all that
+      # is needed: the build for this repo uploads the Snippet.
+      - name: Commit the offsets
+        run: |
+          if git diff --quiet -- snippet.js; then
+            echo "reader already matches, nothing to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add snippet.js
+          git commit -q -F - <<'MESSAGE'
+fix(reader): byte offsets for the refreshed archive
+
+The shards were rebuilt from a newer Protomaps build. The archive is a different
+length, so the offsets the reader holds, and the parts per shard, both change.
+
+The reader answers a range request from one subrequest and a second is the Pro
+plan limit, so it cannot spend one reading the header. The offsets are constants
+and a data refresh has to rewrite them.
+
+Checked against the header shard 0 actually serves, not against any record of
+which build was chosen, so a missed or partial refresh leaves this a no-op.
+MESSAGE
+          git push

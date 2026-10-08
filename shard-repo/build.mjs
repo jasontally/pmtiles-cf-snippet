@@ -12,11 +12,16 @@
  * stream advances. Storing the slice as well would need 20 GB and hit the
  * limit exactly.
  *
+ * The archive comes from archive.json in this repo, not from the environment.
+ * That is deliberate: a GitHub Actions workflow refreshes this shard by committing
+ * that file, the commit triggers this build, and nothing outside Cloudflare needs
+ * a credential. Cloudflare injects its own token.
+ *
  * Required environment:
- *   ARCHIVE_URL     the .pmtiles URL. Must support HTTP Range.
  *   SHARD_INDEX     which shard this repo builds, 0 to 12
  *
  * Optional environment:
+ *   ARCHIVE_URL     override archive.json, for a one-off build
  *   ARCHIVE_NAME    archive name in the asset paths (default: basemap)
  *   TILE_SHARD      bytes per tile part (default: 2000000)
  *   LEAF_SHARD      bytes per leaf part (default: 160000)
@@ -29,7 +34,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { createWriteStream } from "node:fs";
+import { createWriteStream, readFileSync } from "node:fs";
 import { mkdir, writeFile, stat } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { Readable } from "node:stream";
@@ -267,8 +272,51 @@ export class PartExtractor {
   }
 }
 
+/**
+ * The archive this shard should hold, and where that was decided.
+ *
+ * The answer lives in archive.json, in this repo, not in a Cloudflare build
+ * variable. That is what lets a plain GitHub Actions workflow refresh a shard by
+ * committing a file: the commit is the trigger, the file is the payload, and
+ * nothing outside Cloudflare has to hold a credential. Cloudflare injects its own
+ * token into the build.
+ *
+ * ARCHIVE_URL still overrides, for a one-off build against something else. It is
+ * only for that, and the value that is really used is logged, because a stale
+ * variable that silently does nothing is worse than one that is clearly ignored.
+ */
+function archiveConfig() {
+  const file = join(process.cwd(), "archive.json");
+  let fromFile = null;
+  try {
+    fromFile = JSON.parse(readFileSync(file, "utf8"));
+  } catch (error) {
+    // Only a missing file is allowed to fall through to the error below. A typo or
+    // a bad import would otherwise look the same as "not configured", and the
+    // build would fail with a message pointing at the wrong thing.
+    if (error.code !== "ENOENT") {
+      fail(`could not read ${file}: ${error.message}`);
+    }
+  }
+
+  const override = env("ARCHIVE_URL", "");
+  if (override) {
+    console.log(`archive   ${override}  (from the ARCHIVE_URL variable, overriding archive.json)`);
+    if (fromFile?.url && fromFile.url !== override) {
+      console.log(`          archive.json says ${fromFile.url}, which is being ignored`);
+    }
+    return { url: override, key: fromFile?.key || override };
+  }
+
+  if (!fromFile || !fromFile.url) {
+    fail("archive.json is missing or has no url. It names the archive this shard holds.");
+  }
+  console.log(`archive   ${fromFile.url}  (from archive.json, key ${fromFile.key || "unknown"})`);
+  return { url: fromFile.url, key: fromFile.key || fromFile.url };
+}
+
 async function main() {
-  const url = env("ARCHIVE_URL", "");
+  const { url } = archiveConfig();
   const name = env("ARCHIVE_NAME", "basemap");
   const tileShard = Number(env("TILE_SHARD", "2000000"));
   const leafShard = Number(env("LEAF_SHARD", "160000"));
@@ -277,11 +325,10 @@ async function main() {
   const dryRun = env("DRY_RUN", "0") === "1";
   const skipDownload = env("SKIP_DOWNLOAD", "0") === "1";
 
-  if (!url) fail("set ARCHIVE_URL to the .pmtiles URL");
+  if (!url.includes("http")) fail(`the archive url looks wrong: ${url}`);
   if (!Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
-    fail(`set SHARD_INDEX to a whole number from 0 to ${shardCount - 1}`);
+    fail(`set SHARD_INDEX to a whole number from 0 to ${shARDCount - 1}`);
   }
-  if (!url.includes("http")) fail(`ARCHIVE_URL looks wrong: ${url}`);
 
   const outDir = join(process.cwd(), "public", "s", name);
 

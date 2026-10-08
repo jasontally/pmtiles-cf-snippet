@@ -324,13 +324,18 @@ await check("the page links the tiles URL the styles use", () => {
   for (const leak of ["snippet", "Snippet", "Static Assets", "wrangler", "Wrangler", "shard", "part file"]) {
     assert.ok(!page.includes(leak), `the page mentions ${leak}`);
   }
-  // The refresh section has to say when, and must not promise an instant swap.
-  assert.ok(page.includes("Refreshed on Sundays"), "the page does not say when it refreshes");
-  assert.ok(/00:30 and\s+07:00 UTC/.test(page), "the page does not give the refresh window");
+  // The rebuild section has to say when, and must not promise an instant swap.
+  // "Rebuilt", not "refreshed": a weekly rebuild from a new upstream release is
+  // not the same claim as data that keeps itself up to date.
+  assert.ok(page.includes("Rebuilt on Sundays"), "the page does not say when it rebuilds");
+  assert.ok(/00:30 and\s+07:00 UTC/.test(page), "the page does not give the rebuild window");
   assert.ok(
     page.includes("Archive metadata"),
     "the page should point at the archive's own metadata rather than a hard coded date"
   );
+  // It must not claim data that is never out of date, and it must say the lag.
+  assert.ok(!/never (out of date|changes)/i.test(page), "the page promises data that never goes stale");
+  assert.ok(/weekly|week/i.test(page), "the page does not give a staleness scale");
 });
 
 console.log(`${passed} passed, ${failed} failed`);

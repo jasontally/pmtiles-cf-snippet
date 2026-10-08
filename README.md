@@ -44,6 +44,11 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `snippet-rules.mjs` | Pure helpers for the zone-wide snippet rule list. |
 | `snippet-rules.test.mjs` | Tests that the merge cannot drop another rule. |
 | `deploy-test.js` | Checks the deploy requests against a mock API. |
+| `tools/sync-reader.mjs` | Brings the reader's byte offsets in line with the live archive. |
+| `shard-repo/` | The template pushed to each of the 13 shard repos. |
+| `make-repos.mjs` | Creates the shard repos and pushes the template. |
+| `wire-shards.mjs` | Binds each shard repo to its Worker through the API. |
+| `refresh.md` | The weekly data refresh: the window, and how it runs. |
 | `pmtiles-shard-spec.md` | Full specification and measurements. |
 
 ## Use
@@ -198,3 +203,6 @@ the split and deploys the snippet only.
   written by the tool, overrides it.
 * The unverified risk is snippet CPU time on a tile request. Measure it with
   `wrangler tail` while loading a map. See section 12 of the spec.
+* No GitHub repo holds a Cloudflare token. Each shard repo has a workflow that
+  commits the archive it should hold, and that commit starts the build. Cloudflare
+  injects its own token into the build. See [refresh.md](refresh.md).

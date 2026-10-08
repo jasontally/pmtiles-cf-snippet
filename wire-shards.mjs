@@ -14,6 +14,14 @@
  *   node wire-shards.mjs                # wire every shard
  *   node wire-shards.mjs --only 3,7,12  # wire some
  *
+ * Two flags hold builds still, so a template push does not start 13 at once.
+ * Six concurrent builds saturate the upload: one of ours was terminated at
+ * 31 minutes that way, against a 30 minute ceiling.
+ *
+ *   node wire-shards.mjs --hold      # stop a main push building, then wire
+ *   ...push the template to all 13 repos...
+ *   node wire-shards.mjs --release   # let a main push build again
+ *
  * Needs CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID, the same environment
  * Workers Builds provides, and the GitHub CLI for the repo IDs.
  *
@@ -28,11 +36,13 @@ const SHARD_COUNT = 13;
 const WORKER_PREFIX = "pmtiles-shard";
 const REPO_OWNER = "jasontally";
 
-// The dated snapshot, not a moving URL. Every shard must cut parts from the
-// same bytes, and the reader computes part numbers from the archive layout. A
-// republished file at the same URL would shift every part and silently corrupt
-// the map.
-const ARCHIVE_URL = "https://build.protomaps.com/20241021.pmtiles";
+// The dated snapshot, not a moving URL, and it is not held here. It lives in
+// archive.json in each shard repo, which is what lets a plain GitHub Actions
+// workflow refresh a shard without any credential: the commit is the trigger and
+// that file is the payload. A stale ARCHIVE_URL variable left behind would take
+// priority over the file on every build, so the refresh would commit the new key
+// and then build the old archive. That variable is removed below, not just
+// ignored.
 const BUILD_COMMAND = "npm run build";
 const DEPLOY_COMMAND = "npx wrangler deploy";
 
@@ -41,6 +51,15 @@ const TOKEN = process.env.CLOUDFLARE_API_TOKEN;
 const ACCOUNT = process.env.CLOUDFLARE_ACCOUNT_ID;
 
 const dryRun = process.argv.includes("--dry-run");
+const hold = process.argv.includes("--hold");
+const release = process.argv.includes("--release");
+if (hold && release) {
+  console.error("pick one of --hold or --release");
+  process.exit(1);
+}
+const heldNow = hold;
+/** A branch nothing is ever pushed to, so a push starts no build. */
+const HELD_BRANCH = "builds-held";
 const only = (() => {
   const at = process.argv.indexOf("--only");
   if (at === -1) return null;
@@ -176,29 +195,78 @@ async function wireShard(index, tag, buildTokenUuid) {
   const wantedVars = {
     SHARD_INDEX: String(index),
     SHARD_COUNT: String(SHARD_COUNT),
-    ARCHIVE_URL,
   };
   let vars = {};
   if (triggerUuid) {
     vars = (await api(`/accounts/${ACCOUNT}/builds/triggers/${triggerUuid}/environment_variables`)) || {};
   }
   const wrong = Object.entries(wantedVars).filter(([k, v]) => vars[k]?.value !== v);
+  // Present but unwanted. See the note at the top of this file.
+  const staleArchiveUrl = Boolean(vars.ARCHIVE_URL);
   if (!triggerUuid) {
     notes.push(`would set ${Object.keys(wantedVars).join(", ")}`);
-  } else if (wrong.length === 0) {
+  } else if (wrong.length === 0 && !staleArchiveUrl) {
     notes.push(`variables ok`);
   } else if (dryRun) {
-    notes.push(`would set ${wrong.map(([k]) => k).join(", ")}`);
+    notes.push(
+      [
+        wrong.length ? `would set ${wrong.map(([k]) => k).join(", ")}` : "",
+        staleArchiveUrl ? "would remove ARCHIVE_URL" : "",
+      ]
+        .filter(Boolean)
+        .join(", ")
+    );
   } else {
-    await api(`/accounts/${ACCOUNT}/builds/triggers/${triggerUuid}/environment_variables`, {
-      method: "PATCH",
-      body: JSON.stringify(
-        Object.fromEntries(
-          wrong.map(([k, v]) => [k, { is_secret: false, value: v }])
-        )
-      ),
-    });
-    notes.push(`set ${wrong.map(([k]) => k).join(", ")}`);
+    if (wrong.length) {
+      await api(`/accounts/${ACCOUNT}/builds/triggers/${triggerUuid}/environment_variables`, {
+        method: "PATCH",
+        body: JSON.stringify(
+          Object.fromEntries(
+            wrong.map(([k, v]) => [k, { is_secret: false, value: v }])
+          )
+        ),
+      });
+    }
+    // Its own endpoint, not a PATCH with a null. Left in place it would silently
+    // outrank archive.json on every build, so the refresh would commit the new
+    // key and then build the old archive.
+    if (staleArchiveUrl) {
+      await api(
+        `/accounts/${ACCOUNT}/builds/triggers/${triggerUuid}/environment_variables/ARCHIVE_URL`,
+        { method: "DELETE" }
+      );
+    }
+    notes.push(
+      [
+        wrong.length ? `set ${wrong.map(([k]) => k).join(", ")}` : "",
+        staleArchiveUrl ? "removed ARCHIVE_URL" : "",
+      ]
+        .filter(Boolean)
+        .join(", ")
+    );
+  }
+
+  // The branch list is how builds are held. It is the only lever here: there is no
+  // pause endpoint, and a push to a branch the trigger does not name starts
+  // nothing, so holding is safe to leave on while the template is pushed.
+  const wantedBranches = heldNow ? [HELD_BRANCH] : ["main"];
+  // From the worker trigger list, because GET on a single trigger UUID is not a
+  // working endpoint.
+  const branchesNow = wanted?.branch_includes;
+  if (triggerUuid) {
+    if (JSON.stringify(branchesNow) !== JSON.stringify(wantedBranches)) {
+      notes.push(
+        dryRun
+          ? `would set branches=${wantedBranches.join(",")}`
+          : `set branches=${wantedBranches.join(",")}`
+      );
+      if (!dryRun) {
+        await api(`/accounts/${ACCOUNT}/builds/triggers/${triggerUuid}`, {
+          method: "PATCH",
+          body: JSON.stringify({ branch_includes: wantedBranches }),
+        });
+      }
+    }
   }
 
   // Read back everything, so the report is what Cloudflare holds, not what was
@@ -218,10 +286,16 @@ async function wireShard(index, tag, buildTokenUuid) {
   if (!final) {
     if (!dryRun) problems.push("no trigger");
   } else {
+    if (finalVars.ARCHIVE_URL) {
+      problems.push(`ARCHIVE_URL=${finalVars.ARCHIVE_URL.value}, it outranks archive.json`);
+    }
     if (final.build_command !== BUILD_COMMAND) problems.push(`build_command=${final.build_command}`);
     if (final.deploy_command !== DEPLOY_COMMAND) problems.push(`deploy_command=${final.deploy_command}`);
     if (!sameRepo(final.repo_connection?.repo_name, repo)) problems.push("wrong repo");
-    if (!final.branch_includes?.includes("main")) problems.push(`branches=${final.branch_includes}`);
+    // While held, main is deliberately not on the trigger, so do not insist.
+    if (!heldNow && !final.branch_includes?.includes("main")) {
+      problems.push(`branches=${final.branch_includes}`);
+    }
   }
   // Only complain about variables when a trigger exists to hold them.
   if (final) {
@@ -237,7 +311,11 @@ async function main() {
   const tags = await workerTags();
   const buildTokenUuid = await buildToken();
   console.log(`build token ${buildTokenUuid}`);
-  console.log(`archive    ${ARCHIVE_URL}`);
+  console.log("archive    from archive.json in each shard repo, not from here");
+  if (heldNow) {
+    console.log(`held       builds are off. branch_includes is ${HELD_BRANCH}, so a push to`);
+    console.log("           main starts nothing. Remember to --release afterwards.");
+  }
   if (dryRun) console.log("DRY RUN: nothing is changed\n");
 
   const rows = [];

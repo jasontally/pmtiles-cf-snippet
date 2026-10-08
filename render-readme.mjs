@@ -32,11 +32,16 @@ For reference, the settings are:
 
 | Setting | Value |
 |---|---|
-| \`ARCHIVE_URL\` | the dated .pmtiles URL. It must support HTTP Range |
 | \`SHARD_INDEX\` | \`${index}\` |
 | \`SHARD_COUNT\` | \`13\` |
 | Build command | \`npm run build\` |
 | Deploy command | \`npx wrangler deploy\` |
+
+There is deliberately no \`ARCHIVE_URL\` build variable. The archive comes from
+\`archive.json\` in the repo, because \`.github/workflows/refresh.yml\` refreshes
+this shard by committing that file and the commit is what starts the build. A
+build variable cannot be changed by a GitHub workflow without a Cloudflare token,
+so leaving it there would mean the refresh needed a credential in GitHub.
 
 A push to \`main\` starts a build. The build command downloads only this shard's
 bytes and writes them to \`public/\`. The deploy command uploads them with

@@ -23,6 +23,7 @@
  */
 
 import { spawnSync } from "node:child_process";
+import { workflowFor, slotFor } from "./shard-repo/render-workflow.mjs";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -89,6 +90,11 @@ function preflight() {
 function stage(index) {
   const dir = mkdtempSync(join(tmpdir(), `shard-${index}-`));
   cpSync(TEMPLATE, dir, { recursive: true });
+  // The template is copied whole, then the per shard workflow is written over it.
+  rmSync(join(dir, ".github"), { recursive: true, force: true });
+  // render-workflow.mjs exists to generate the workflow above, in this repo. In a
+  // shard repo it would be dead code that looks like it does something.
+  rmSync(join(dir, "render-workflow.mjs"), { force: true });
   const worker = workerName(index);
   const config = join(dir, "wrangler.jsonc");
   writeFileSync(config, readFileSync(config, "utf8").replace("SHARD_WORKER_NAME", worker));
@@ -104,6 +110,15 @@ function stage(index) {
 
   const readme = join(dir, "README.md");
   writeFileSync(readme, readmeFor(index, worker));
+
+  // The refresh workflow, with this shard's half hour slot. It lives in the shard
+  // repo rather than in this one so the refresh needs no credential: a workflow
+  // that pushed to 13 other repos would need a personal access token stored in
+  // GitHub, which is the thing this design exists to avoid.
+  const workflow = join(dir, ".github", "workflows", "refresh.yml");
+  mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
+  writeFileSync(workflow, workflowFor(index));
+
   return dir;
 }
 
@@ -132,9 +147,13 @@ Set these as build variables in the Cloudflare dashboard:
 
 | Variable | Value |
 |---|---|
-| \`ARCHIVE_URL\` | the .pmtiles URL. It must support HTTP Range |
 | \`SHARD_INDEX\` | \`${index}\` |
 | \`SHARD_COUNT\` | \`13\` |
+
+The archive itself comes from \`archive.json\` in this repo, not from a build
+variable. That is deliberate: \`.github/workflows/refresh.yml\` commits a newer
+Protomaps build there, the commit starts this build, and nothing outside
+Cloudflare needs a credential. See refresh.md in pmtiles-cf-snippet.
 
 Set these commands under **Settings > Build**:
 
@@ -142,6 +161,8 @@ Set these commands under **Settings > Build**:
 |---|---|
 | Build command | \`npm run build\` |
 | Deploy command | \`npx wrangler deploy\` |
+
+This shard's refresh slot is **${slotFor(index).hour}:${String(slotFor(index).minute).padStart(2, "0")} UTC on Sunday**.
 
 The build command downloads only this shard's bytes and writes them to
 \`public/\`. The deploy command uploads them with wrangler, which skips any part

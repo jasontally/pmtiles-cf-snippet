@@ -345,8 +345,10 @@ console.log(tile.data.byteLength);</code></pre>
       it, host your own copy of the tiles or buy a supported plan from someone.
     </li>
     <li>
-      <strong>The data is not being refreshed.</strong> The archive is a snapshot of
-      the Protomaps Basemap. New OpenStreetMap edits do not appear in it.
+      <strong>It is never current to the hour.</strong> The copy is rebuilt weekly
+      from the newest Protomaps Basemap release, so OpenStreetMap edits made this
+      week are not in it yet. Expect a delay of a few days to a week or more behind
+      OpenStreetMap.
     </li>
     <li>
       <strong>No whole-file download.</strong> Requests are answered in ranges of at
@@ -362,14 +364,19 @@ console.log(tile.data.byteLength);</code></pre>
 
 <section id="freshness">
   <h2>How fresh is this?</h2>
-  <p class="sub">The tiles are a copy of the Protomaps Basemap, refreshed weekly.</p>
+  <p class="sub">The tiles are a copy of the Protomaps Basemap, rebuilt weekly.</p>
 
   <ul>
     <li>
-      <strong>Refreshed on Sundays.</strong> The copy is rebuilt between 00:30 and
+      <strong>Rebuilt on Sundays.</strong> The rebuild runs between 00:30 and
       07:00 UTC. That is the only window in which the upstream project has never
-      published in three years of release history, so a refresh is not competing
+      published in three years of release history, so a rebuild is not competing
       with a new upstream build halfway through.
+    </li>
+    <li>
+      <strong>Nothing to do most weeks.</strong> A rebuild only happens when the
+      upstream project has published something new since the last one. In a week
+      with no new upstream release, nothing is rebuilt.
     </li>
     <li>
       <strong>Which upstream build is in use right now?</strong> Use the
@@ -378,7 +385,7 @@ console.log(tile.data.byteLength);</code></pre>
       something this page could have gone stale about.
     </li>
     <li>
-      <strong>A refresh is not instantaneous.</strong> It is thirteen separate
+      <strong>A rebuild is not instantaneous.</strong> It is thirteen separate
       rebuilds spread over about six and a half hours, one at a time. For most of
       that window the copy is a mix of two upstream builds. A tile you request
       during it may come from the newer build rather than the one the reader
@@ -386,8 +393,9 @@ console.log(tile.data.byteLength);</code></pre>
       map.
     </li>
     <li>
-      <strong>A refresh can be missed.</strong> It is a best-effort job, not a
-      guarantee. If it fails, the previous build keeps serving.
+      <strong>A rebuild can be missed.</strong> It is a best-effort job, not a
+      guarantee. If one step fails, the rest of the copy stays on the previous
+      upstream build. It is still a working map.
     </li>
   </ul>
 </section>

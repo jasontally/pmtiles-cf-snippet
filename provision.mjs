@@ -251,8 +251,10 @@ async function main() {
   }
 
   console.log(`\ncreated ${created} Worker(s), attached ${attached} domain(s)`);
-  console.log("\nNext: write each wrangler.jsonc into its shard repo, then set");
-  console.log("  SHARD_INDEX, ARCHIVE_URL and WORKER_NAME as build variables.");
+  console.log("\nNext: node make-repos.mjs  to create the shard repos with the template,");
+  console.log("  then node wire-shards.mjs  to bind them and set SHARD_INDEX and");
+  console.log("  SHARD_COUNT. The archive comes from archive.json in each repo, not from a");
+  console.log("  build variable. See refresh.md.");
 }
 
 function pad(value, width) {
