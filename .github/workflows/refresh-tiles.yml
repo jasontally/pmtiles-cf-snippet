@@ -1,0 +1,73 @@
+name: Refresh tiles
+
+# Refresh the 13 shards of the PMTiles archive, one per run.
+#
+# A shard build takes about 20 minutes and there are 13 shards, so a refresh is
+# about 6.5 hours. One build at a time, because six at once saturate the upload
+# bandwidth: of 22 builds, one was terminated at 31 minutes when six ran together.
+#
+# The cron runs every 30 minutes all day on Sunday and the script decides whether
+# the current time is inside the quiet window. That keeps the window in one place,
+# in code that can be tested, instead of spread across a cron expression. The runs
+# outside the window exit in about five seconds.
+#
+# The window is 00:30 to 07:00 UTC. 00:16 to 07:34 UTC is the only span in which
+# Protomaps has never published in 159 weeks of release history. See refresh.md.
+on:
+  schedule:
+    - cron: '*/30 * * * 0,1'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Ignore the quiet window and start a cycle now
+        type: boolean
+        default: false
+      report:
+        description: Only report where every shard stands, change nothing
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+# One refresh at a time. A run that is cancelled part way could leave a shard
+# started but its state uncommitted, so a queued run is left to finish instead.
+concurrency:
+  group: refresh-tiles
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+
+      - name: Report
+        if: ${{ inputs.report == true }}
+        run: node tools/refresh-tiles.mjs --report
+
+      - name: Refresh the next shard
+        if: ${{ inputs.report != true }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: node tools/refresh-tiles.mjs ${{ inputs.force == true && '--new-cycle' || '' }}
+
+      # The state file is committed by the script. Push anything left, such as the
+      # reader offsets, so a manual run outside Actions does not leave a commit
+      # behind on the branch.
+      - name: Push anything outstanding
+        run: |
+          if [ -n "$(git status --porcelain)" ]; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add -A
+            git commit -q -m "chore: refresh state"
+            git push
+          else
+            echo "clean"
+          fi
