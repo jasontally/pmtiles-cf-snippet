@@ -457,7 +457,22 @@ async function apiCall(path, options = {}) {
     fail(`${options.method || "GET"} ${path} returned ${response.status}: ${text.slice(0, 300)}`);
   }
   if (!response.ok || payload.success === false) {
-    const detail = JSON.stringify(payload.errors || payload).slice(0, 400);
+    const errors = payload.errors || [];
+    const detail = JSON.stringify(errors.length ? errors : payload).slice(0, 400);
+    // Cloudflare reports a plan restriction as a 400 with "not entitled". Name
+    // it, because the message does not say which operator or which plan.
+    const entitled = errors.find((e) => /not entitled/i.test(e.message || ""));
+    if (entitled) {
+      const operator = (/operator (\w+)/i.exec(entitled.message) || [])[1];
+      fail(
+        `${options.method || "GET"} ${path} returned ${response.status}: ${detail}\n` +
+        (operator
+          ? `The ${operator} operator needs a Business or Enterprise plan. ` +
+            `This zone is on a lower plan. Use eq, ne, contains, or wildcard instead. ` +
+            `Set SNIPPET_RULE to an expression that avoids ${operator}.`
+          : "This zone does not have the plan required for this expression.")
+      );
+    }
     fail(`${options.method || "GET"} ${path} returned ${response.status}: ${detail}`);
   }
   return payload.result;
@@ -509,12 +524,24 @@ function zoneCandidates(host) {
   return [...new Set(out.filter(Boolean))];
 }
 
-/** The rule expression. SNIPPET_RULE overrides it. */
+/**
+ * The rule expression. SNIPPET_RULE overrides it.
+ *
+ * Only operators that every paid plan accepts are used. `matches` needs a
+ * Business or Enterprise plan, so a regex on the path is rejected on Pro with
+ * "not entitled: the use of operator Matches is not allowed". `eq` and
+ * `contains` have no plan restriction.
+ *
+ * The path check is deliberately loose. `contains ".pmtiles"` also matches
+ * "/foo.pmtiles.bak", and the snippet answers 404 for anything that is not
+ * exactly "/<name>.pmtiles". A narrower expression needs `matches` or
+ * `ends_with`, and `ends_with` is a Business plan function.
+ */
 function snippetRule() {
   const override = env("SNIPPET_RULE", "");
   if (override) return override;
   const host = env("SNIPPET_HOST", "tiles.example.com");
-  return `(http.host eq "${host}" and http.request.uri.path matches "^/[^/]+\\.pmtiles$")`;
+  return `(http.host eq "${host}" and http.request.uri.path contains ".pmtiles")`;
 }
 
 async function deploySnippet() {
@@ -529,9 +556,6 @@ async function deploySnippet() {
   }
 
   const small = await minifySnippet();
-
-  const digest = createHash("sha256").update(small).digest("hex").slice(0, 12);
-  console.log(`sha256:${digest}`);
 
   const expression = snippetRule();
 

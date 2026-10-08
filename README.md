@@ -129,7 +129,20 @@ that name itself for the token it holds. Setting it would replace Cloudflare's
 own token. The build command reads the same value, so nothing needs adding.
 
 `CLOUDFLARE_ZONE_ID` and `SNIPPET_HOST` are enough. `SNIPPET_HOST` sets the
-rule; `CLOUDFLARE_ZONE_ID` skips the zone lookup. `CLOUDFLARE_ACCOUNT_ID` is
+rule; `CLOUDFLARE_ZONE_ID` skips the zone lookup.
+
+The default rule is:
+
+```
+(http.host eq "tiles.jasontally.com" and http.request.uri.path contains ".pmtiles")
+```
+
+It uses only `eq` and `contains`. The `matches` operator and the
+`ends_with()` function both need a Business or Enterprise plan, and this zone is
+on Pro. Cloudflare refuses the rule with a `400` and a message that does not say
+which operator or which plan, so the build adds that. The path test is loose on
+purpose: `contains ".pmtiles"` also matches `/foo.pmtiles.bak`, and the snippet
+answers `404` for anything that is not exactly `/<name>.pmtiles`. `CLOUDFLARE_ACCOUNT_ID` is
 accepted and not used, because wrangler reads its own credentials.
 
 The token needs Workers Scripts Edit for the assets and Snippets Edit for the

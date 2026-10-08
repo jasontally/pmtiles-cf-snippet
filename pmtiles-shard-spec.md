@@ -408,7 +408,7 @@ python3 shard-pmtiles.py --selftest   # section planning and byte reconstruction
 node snippet-test.js                  # the snippet against a real split, 20 checks
 node minify-test.js                   # the minifier, 19 checks
 node --test snippet-rules.test.mjs   # the rule list merge, 13 checks
-node deploy-test.js                   # the deploy requests, against a mock API, 19 checks
+node deploy-test.js                   # the deploy requests, against a mock API, 21 checks
 ```
 
 `snippet-test.js` splits a small synthetic archive with the real tool, then
@@ -483,7 +483,30 @@ bare array, so the read produced an empty list and the write sent one rule.
 value, verifies the token, resolves the zone, and lists every rule split into
 ours and owned by others. It never deploys.
 
-### 14.2 Preview branches
+### 14.2 Plan limits on rule operators
+
+The rule must not use `matches` or `ends_with()`. Both need a Business or
+Enterprise plan and this zone is on Pro. Cloudflare answers `400` with:
+
+    not entitled: the use of operator Matches is not allowed, a Business plan or
+    a WAF Advanced plan is required
+
+The message names neither the operator clearly nor the plan to upgrade to, so
+the build detects the `not entitled` text and prints the operator, the required
+plan, and the way out: set `SNIPPET_RULE` to an expression using `eq`, `ne`,
+`contains`, or `wildcard`.
+
+The default rule is:
+
+    (http.host eq "tiles.jasontally.com" and http.request.uri.path contains ".pmtiles")
+
+The path test is loose on purpose. `contains ".pmtiles"` also matches
+`/foo.pmtiles.bak`, and the snippet answers `404` for anything that is not
+exactly `/<name>.pmtiles`. A tighter path test needs a plan the zone does not
+have, and the extra safety would be illusory: the snippet already validates the
+path exactly.
+
+### 14.3 Preview branches
 
 Preview branches run the preview command, not the deploy command. So a preview
 build uploads no assets and no snippet. A snippet is a zone resource, so a
@@ -493,7 +516,7 @@ preview cannot have its own. A preview Worker serves the part files at its
 
 To test a preview, request a part file directly. See test 1 in section 12.
 
-### 14.3 Why the snippet goes second
+### 14.4 Why the snippet goes second
 
 The snippet answers `tiles.jasontally.com/basemap.pmtiles`. If it went live
 before the parts, every tile request would return `502` until the upload

@@ -485,6 +485,75 @@ await check("doctor reports the settings without changing anything", async () =>
   }
 });
 
+await check("the default rule avoids operators that need a paid plan", async () => {
+  const api = await mockApi();
+  try {
+    const run = await runBuild(
+      { ...CREDENTIALS, SNIPPET_HOST: "tiles.jasontally.com" },
+      api.base
+    );
+    assert.equal(run.status, 0, run.stderr);
+    const puts = api.requests.filter(
+      (r) => r.url.endsWith("/snippet_rules") && r.method === "PUT"
+    );
+    const ours = JSON.parse(puts.at(-1).body).rules.find((r) => r.snippet_name === "pmtiles");
+
+    // matches and ends_with need Business or Enterprise. This zone is Pro.
+    assert.ok(
+      !/\bmatches\b/.test(ours.expression),
+      `matches needs Business or Enterprise: ${ours.expression}`
+    );
+    assert.ok(
+      !/ends_with/.test(ours.expression),
+      `ends_with needs Business or Enterprise: ${ours.expression}`
+    );
+    // eq and contains have no plan restriction.
+    assert.match(ours.expression, /http\.host eq "tiles\.jasontally\.com"/);
+    assert.match(ours.expression, /contains "\.pmtiles"/);
+  } finally {
+    await api.close();
+  }
+});
+
+await check("names the plan limit when the API refuses an operator", async () => {
+  // Cloudflare answers 400 with "not entitled" and does not say which plan or
+  // which operator, so the build has to add it.
+  const server = createServer((req, res) => {
+    req.on("data", () => {});
+    req.on("end", () => {
+      res.setHeader("content-type", "application/json");
+      res.statusCode = 400;
+      res.end(JSON.stringify({
+        success: false,
+        errors: [{
+          code: 1004,
+          message:
+            "not entitled: the use of operator Matches is not allowed, a Business plan or a WAF Advanced plan is required",
+        }],
+      }));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const run = await runBuild(CREDENTIALS, base);
+    assert.notEqual(run.status, 0, "a plan refusal must fail the build");
+    assert.ok(
+      /Matches/.test(run.stderr) && /Business or Enterprise/.test(run.stderr),
+      `expected the operator and the plan, got: ${run.stderr.slice(0, 400)}`
+    );
+    assert.ok(
+      /SNIPPET_RULE/.test(run.stderr),
+      `expected the escape hatch to be named, got: ${run.stderr.slice(0, 400)}`
+    );
+  } finally {
+    await new Promise((resolve) => {
+      server.closeAllConnections();
+      server.close(resolve);
+    });
+  }
+});
+
 await check("the wrangler name matches the Worker name", async () => {
   // Workers Builds fails the build when this does not match the Worker name in
   // the dashboard, so the test pins the value.
