@@ -359,6 +359,47 @@ for (const source of Object.values(style.sources)) {
 
 new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.35, 48.85], zoom: 4 });</code></pre>
 
+  <h3>Three. Where to put the style you made</h3>
+  <p>
+    The <strong>Style JSON</strong> button in the builder above opens the style this
+    map is drawing right now, edits included, and the dialog has a copy button. Two
+    ways to use what it gives you, and both are ordinary web pages.
+  </p>
+  <p>
+    Save it as a file next to your page and point <code>style</code> at it, the way
+    the three styles on this host are used. This is the one to choose if the style is
+    yours and changes with your site:
+  </p>
+<pre><code><span class="c">// Save the copied JSON as my-basemap.json beside this file.</span>
+new maplibregl.Map({
+  container: <span class="s">"map"</span>,
+  style: <span class="s">"my-basemap.json"</span>,           <span class="c">// relative, same origin</span>
+  center: [2.35, 48.85],
+  zoom: 4
+});</code></pre>
+  <p>
+    Or keep it in the HTML, which is one file to move and nothing to host. The same
+    style, only the place it lives is different:
+  </p>
+<pre><code><span class="c">// The copied JSON, pasted straight into the page.</span>
+const myStyle = {
+  <span class="s">"version"</span>: 8,
+  <span class="s">"name"</span>: <span class="s">"Protomaps Basemap — custom"</span>,
+  <span class="s">"glyphs"</span>: <span class="s">"https://tiles.jasontally.com/font/{fontstack}/{range}.pbf"</span>,
+  <span class="s">"sprite"</span>: <span class="s">"https://tiles.jasontally.com/sprites/v4/light"</span>,
+  <span class="s">"sources"</span>: { <span class="c">/* ... as copied ... */ </span>},
+  <span class="s">"layers"</span>:  [ <span class="c">/* ... as copied ... */ </span>]
+};
+
+new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zoom: 4 });</code></pre>
+  <p class="note">
+    Leave the <code>glyphs</code> and <code>sprite</code> lines as they are. They are
+    what draws the labels and the icons, and they point at this host, so a style you
+    paste into your own page keeps working from wherever you serve it. Point them at
+    <code>protomaps.github.io/basemaps-assets</code> instead if you would rather not
+    depend on this host at all.
+  </p>
+
   <p class="note">
     <strong>One thing to check before you swap.</strong> This archive is
     <strong>Protomaps schema v3</strong>. A style written for a different schema
@@ -367,7 +408,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     copy from.
   </p>
 
-  <h3>Three. Fonts, sprites and the libraries</h3>
+  <h3>Four. Fonts, sprites and the libraries</h3>
   <p>
     A map is the tiles, a <code>glyphs</code> URL for text, optionally a
     <code>sprite</code> URL for icons, and two libraries to draw any of it. All of
@@ -431,6 +472,76 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     how many characters a route number is and not what they are, so a shield drawn
     from it would be a blank shape on every motorway.
   </p>
+
+    <h3>Writing a layer yourself, and colouring it</h3>
+    <p>
+      A layer is a filter, a zoom, a shape and a colour. Two things in the filter get
+      everybody, and both fail without an error:
+    </p>
+    <ul>
+      <li>
+        <strong><code>kind</code> is the coarse name.</strong> For roads it is one of
+        <code>highway</code>, <code>major_road</code>, <code>minor_road</code>,
+        <code>path</code>, <code>rail</code>. The names in the upstream documentation
+        — <code>motorway</code>, <code>primary</code>, <code>residential</code> — are
+        <code>kind_detail</code> values, and a layer that filters <code>kind</code>
+        against them draws nothing and says so nowhere.
+      </li>
+      <li>
+        <strong>A layer is not drawn below its own <code>minzoom</code>.</strong> The
+        archive stops at z15, so a layer whose minzoom is 16 is never drawn at all.
+        Most features also carry their own <code>min_zoom</code>, the zoom at which
+        the data says they are worth showing, and the shipped styles test that too.
+      </li>
+    </ul>
+    <p>So a road, its name, and a toggle to switch the line off:</p>
+<pre><code>{
+  <span class="s">"id"</span>: <span class="s">"road-major"</span>,
+  <span class="s">"type"</span>: <span class="s">"line"</span>,
+  <span class="s">"source"</span>: <span class="s">"protomaps"</span>,
+  <span class="s">"source-layer"</span>: <span class="s">"roads"</span>,            <span class="c">// one of the nine</span>
+  <span class="s">"minzoom"</span>: 4,                                  <span class="c">// not drawn below this</span>
+  <span class="s">"filter"</span>: [<span class="s">"=="</span>, [<span class="s">"get"</span>, <span class="s">"kind"</span>], <span class="s">"major_road"</span>],
+  <span class="s">"layout"</span>: {
+    <span class="s">"line-cap"</span>: <span class="s">"round"</span>,
+    <span class="s">"visibility"</span>: <span class="s">"visible"</span>          <span class="c">// "none" to hide it</span>
+  },
+  <span class="s">"paint"</span>: {
+    <span class="s">"line-color"</span>: <span class="s">"#f7c44d"</span>,          <span class="c">// any CSS colour</span>
+    <span class="s">"line-width"</span>: [<span class="s">"interpolate"</span>, [<span class="s">"linear"</span>], [<span class="s">"zoom"</span>], 4, 1.7, 12, 6]
+  }
+}</code></pre>
+    <p>
+      A name is a symbol layer reading the <code>name</code> field, with a halo or
+      nothing behind it. A missing glyph is silent, so the stack you ask for must be
+      one of the two on this host:
+    </p>
+<pre><code>{
+  <span class="s">"id"</span>: <span class="s">"road-label-major"</span>,
+  <span class="s">"type"</span>: <span class="s">"symbol"</span>,
+  <span class="s">"source"</span>: <span class="s">"protomaps"</span>,
+  <span class="s">"source-layer"</span>: <span class="s">"roads"</span>,
+  <span class="s">"minzoom"</span>: 11,
+  <span class="s">"layout"</span>: {
+    <span class="s">"text-field"</span>: [<span class="s">"coalesce"</span>, [<span class="s">"get"</span>, <span class="s">"name:en"</span>], [<span class="s">"get"</span>, <span class="s">"name"</span>]],
+    <span class="s">"text-font"</span>: [<span class="s">"Noto Sans Medium"</span>],  <span class="c">// or Noto Sans Regular</span>
+    <span class="s">"text-size"</span>: 10,
+    <span class="s">"symbol-placement"</span>: <span class="s">"line"</span>       <span class="c">// follow the road</span>
+  },
+  <span class="s">"paint"</span>: {
+    <span class="s">"text-color"</span>: <span class="s">"#2b2a26"</span>,
+    <span class="s">"text-halo-color"</span>: <span class="s">"#ffffff"</span>,
+    <span class="s">"text-halo-width"</span>: 1.1
+  }
+}</code></pre>
+    <p class="note">
+      One rule underneath all of this: a layer that draws nothing is not an error.
+      MapLibre will not tell you a filter matched nothing, that a font stack is not on
+      the host, or that an icon is missing from the sheet, and a missing icon takes
+      the label with it. If a layer of yours is blank, the order worth checking is the
+      field name, then the layer's minzoom, then the font stack, then the icon name
+      against the sheet's own <code>light.json</code>.
+    </p>
   <p>
     If you have a style that points its glyphs at <code>demotiles.maplibre.org</code>,
     replacing that hostname is the whole change. The path is deliberately the same.
@@ -466,7 +577,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     command.
   </p>
 
-  <h3>Four. About Leaflet</h3>
+  <h3>Five. About Leaflet</h3>
   <p class="note">
     These are <strong>vector</strong> tiles. Leaflet draws raster tiles, and the
     PMTiles library will refuse this archive in Leaflet with
@@ -476,7 +587,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     need a raster-rendered archive, which this is not.
   </p>
 
-  <h3>Five. Read the archive with the PMTiles library</h3>
+  <h3>Six. Read the archive with the PMTiles library</h3>
   <p>No map, just data. Useful for scripts, tests and anything that is not a picture.</p>
 <pre><code>import { PMTiles, FetchSource } from <span class="s">"pmtiles"</span>;
 
@@ -498,8 +609,10 @@ console.log(tile.data.byteLength);</code></pre>
     <code>FetchSource</code>; given a URL string it will not work.
   </p>
   <p class="note">
-    The archive is a fixed snapshot and is not being refreshed. If you need current
-    OpenStreetMap data, use a source that publishes updates.
+    The archive is a snapshot, rebuilt weekly from a new Protomaps release. It is
+    never current to the hour, so if you need today's OpenStreetMap data use a source
+    that publishes updates. The timing and the delay to expect are in
+    <a href="#freshness">How fresh is this?</a>.
   </p>
 </section>
 

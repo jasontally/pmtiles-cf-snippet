@@ -850,5 +850,46 @@ await check("the sources the styles name, the glyphs and the sheets all exist", 
   }
 });
 
+await check("the examples cover the layers, the colours, and where the copy goes", () => {
+  // These are the things a reader has to be told, learned the hard way here: a
+  // filter on the wrong field draws nothing and says nothing, and a layer above the
+  // archive's top zoom never draws. Also that the builder's copy is a file they put
+  // somewhere, which the docs used to leave out entirely. Nothing in this is new
+  // prose for its own sake.
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+
+  // Where the copy goes, both ways.
+  assert.ok(page.includes("Where to put the style you made"), "there is no section on using a copied style");
+  assert.ok(/style: <span[^>]*>"my-basemap\.json"/.test(page), "no example of a saved file");
+  assert.ok(/const myStyle = \{/.test(page), "no example of a style inline in the page");
+
+  // The two things in a filter that get everybody.
+  assert.ok(/kind<\/code> is the coarse name/.test(page), "the kind vocabulary is not explained");
+  for (const kind of ["highway", "major_road", "minor_road", "path", "rail"]) {
+    assert.ok(page.includes(kind), `the roads kind ${kind} is not listed`);
+  }
+  for (const detail of ["motorway", "primary", "residential"]) {
+    assert.ok(page.includes(detail), `${detail} is not named as a kind_detail`);
+  }
+  assert.ok(page.includes("kind_detail"), "kind_detail is not named at all");
+
+  // The minzoom rules, including the one that cost the address layer its chance.
+  assert.ok(/A layer is not drawn below its own <code>minzoom/.test(page),
+    "the layer minzoom rule is not explained");
+  assert.ok(page.includes("The archive stops at z15"), "the z15 ceiling is not stated");
+
+  // The silence of a blank layer, which is what made all of this hard to find.
+  assert.ok(/a layer that draws nothing is not an error/i.test(page),
+    "the page does not say that a blank layer is silent");
+
+  // Colours: a paint block a reader can copy the shape of.
+  assert.ok(page.includes('"line-color"'), "no line colour example");
+  assert.ok(page.includes('"text-color"'), "no text colour example");
+
+  // And the freshness claim is current, not the old "not being refreshed".
+  assert.ok(!page.includes("is not being refreshed"), "the page still says the archive is not refreshed");
+  assert.ok(page.includes("rebuilt weekly"), "the page does not say the copy is rebuilt weekly");
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
