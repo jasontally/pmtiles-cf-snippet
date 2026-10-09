@@ -31,6 +31,8 @@
     "assets:check": "node tools/fetch-assets.mjs --check",
     "bench:assets": "node tools/bench-assets.mjs",
     "check:fields": "node tools/check-fields.mjs",
-    "check:style": "node tools/check-style.mjs"
+    "check:style": "node tools/check-style.mjs",
+    "coverage": "node tools/layer-coverage.mjs",
+    "coverage:full": "node tools/layer-coverage.mjs --full"
   }
 }

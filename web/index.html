@@ -113,6 +113,20 @@
     font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
   .maphint:empty { display: none; }
 
+  /* Zoom, bottom right, where a reader looking at the map expects it. Stacked the
+     other way from a usual control, with the level between the two buttons, so the
+     level is the thing and the buttons frame it. */
+  .zoomer { position: absolute; bottom: .6rem; right: .6rem; z-index: 2; display: flex;
+    align-items: center; gap: .1rem; background: rgba(255,255,255,.92); color: #24231f;
+    border: 1px solid rgba(0,0,0,.12); border-radius: 999px; padding: .1rem;
+    box-shadow: 0 1px 3px rgba(0,0,0,.18); font-size: .8rem; }
+  .zoomer button { font: inherit; line-height: 1; width: 1.5rem; height: 1.5rem; padding: 0;
+    border: 0; border-radius: 999px; background: none; color: inherit; cursor: pointer; }
+  .zoomer button:hover { background: rgba(0,0,0,.08); }
+  .zoomer button:disabled { opacity: .35; cursor: default; background: none; }
+  #zoom-readout { min-width: 2.2rem; text-align: center; font-variant-numeric: tabular-nums;
+    font-weight: 600; padding: 0 .15rem; }
+
   /* The map and the builder, side by side when there is room for both.
      Sticky on the map so a colour change is something you watch happen: without
      it, the map scrolls out of view while the controls are still on screen. */
@@ -220,6 +234,16 @@
             <button type="button" id="show-style">Style JSON</button>
             <button type="button" id="show-meta">Archive metadata</button>
           </div>
+        </div>
+        <!-- Zoom. The readout is not decoration: a layer that starts at z15 is
+             invisible at z6, and testing that needs to know which zoom you are
+             at. It listens to the map's own zoom and move events, so it is right
+             no matter what moved it: these buttons, a scroll, a pinch, a
+             double-click, or the keyboard. -->
+        <div class="zoomer">
+          <button type="button" id="zoom-out" aria-label="Zoom out">&minus;</button>
+          <span id="zoom-readout" title="Zoom level. The archive holds z0 to z15.">z0</span>
+          <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
         </div>
         <span class="maphint" id="maphint"></span>
       </div>
@@ -597,6 +621,33 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   // hard-coding the layer names on this page.
   let archive = null;
 
+  // ---- zoom ----
+  //
+  // The archive stops at z15, so the level is not only information: it is what
+  // tells you which layers have any chance of drawing. `move` fires whenever the
+  // view changes, including from any of the input methods not routed through these
+  // two buttons, so this stays right without knowing which one moved it.
+  const MAX_ZOOM = 15;
+  const MIN_ZOOM = 0;
+
+  function paintZoom() {
+    const zoom = map.getZoom();
+    const readout = $("zoom-readout");
+    readout.textContent = zoom % 1 === 0 ? `z${zoom}` : `z${zoom.toFixed(1)}`;
+    readout.title = `zoom ${zoom.toFixed(1)}. The archive holds z0 to z15, ` +
+      `and a layer that starts above this one draws nothing.`;
+    $("zoom-in").disabled = zoom >= MAX_ZOOM - 0.001;
+    $("zoom-out").disabled = zoom <= MIN_ZOOM + 0.001;
+  }
+
+  function wireZoom() {
+    $("zoom-in").addEventListener("click", () => map.zoomIn());
+    $("zoom-out").addEventListener("click", () => map.zoomOut());
+    map.on("move", paintZoom);
+    map.on("zoom", paintZoom);
+    paintZoom();
+  }
+
   function setHint(text) { $("maphint").textContent = text; }
 
   function countSourceEvents(mapInstance) {
@@ -675,6 +726,8 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       attributionControl: false
     });
     map.addControl(new maplibregl.AttributionControl({ compact: true }));
+
+    wireZoom();
 
     const failed = countSourceEvents(map);
     map.on("idle", () => {
@@ -914,15 +967,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
         marks.push("z" + toggle.minzoom + "+");
         button.title = toggle.label + " are drawn from zoom " + toggle.minzoom + " upwards";
       }
-      if (toggle.needs) {
-        // A layer that is correct and silent reads as broken, so one that is
-        // waiting for the archive to carry a field says so.
-        marks.push("needs " + toggle.needs.split(".")[1]);
-        const which = toggle.needs.split(".")[0];
-        button.title = (button.title ? button.title + ". " : "") +
-          toggle.label + " are built and will draw when the tiles carry " + which +
-          "." + toggle.needs.split(".")[1] + ". They are not in the current build.";
-      }
       if (marks.length) {
         button.append(toggle.label, Object.assign(document.createElement("span"), {
           className: "zmin",
@@ -944,11 +988,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
         const why = [];
         if (!on && toggle.minzoom > 0 && map.getZoom() < toggle.minzoom) {
           why.push(toggle.label + " start at zoom " + toggle.minzoom + ", so zoom in to see them disappear");
-        }
-        if (!on && toggle.needs) {
-          const [which, field] = toggle.needs.split(".");
-          why.push(toggle.label + " need " + which + "." + field +
-            ", which this build of the tiles does not carry yet");
         }
         say(why.length ? why.join(". ") + "." : "");
       });

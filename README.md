@@ -47,6 +47,8 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `tools/sync-reader.mjs` | Brings the reader's byte offsets in line with the live archive. |
 | `tools/fetch-assets.mjs` | Vendors the fonts and the sprites, and checks them by digest. |
 | `tools/check-fields.mjs` | Reads real tiles and reports which fields the archive carries. |
+| `tools/layer-coverage.mjs` | Runs each style layer's filter over 2208 tiles and reports how often it draws. |
+| `tools/probe-load.mjs` | Fetches everything a browser fetches, with a deadline per request. |
 | `tools/check-style.mjs` | Loads each published style in a browser and asserts each layer draws. |
 | `tools/bench-assets.mjs` | Measures this host against jsDelivr and the upstream assets site. |
 | `asset-hosting.md` | Where the fonts, sprites and libraries are served from, and why. |

@@ -17,6 +17,9 @@ __pycache__/
 *.pyc
 .DS_Store
 
+# Per-project OpenCode config: enables the MCP servers for this repo.
+opencode.jsonc
+
 # Browser test artefacts from the MCP playwright server.
 .playwright-mcp/
 

@@ -17,7 +17,7 @@
  * data. Everything else is styling.
  */
 
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 // The renderer is shared with the browser, so the page and the build agree.
@@ -64,7 +64,10 @@ const POI_ICONS = {
   building: "building", bus_stop: "bus_stop", clothes: "clothes",
   convenience: "convenience", drinking_water: "drinking_water",
   electronics: "electronics", forest: "forest", garden: "garden",
-  marina: "marina", harbour: "harbour", port: "port", ferry_terminal: "ferry_terminal",
+  // No harbour and no port icon in the sheets, so both draw the marina. A POI with
+  // the wrong icon is present on the map; a POI with no icon and no label is absent
+  // from it.
+  marina: "marina", harbour: "marina", port: "marina", ferry_terminal: "ferry_terminal",
   museum: "museum", park: "park", national_park: "park", peak: "peak",
   post_office: "post_office", school: "school", stadium: "stadium",
   supermarket: "supermarket", theatre: "theatre", toilets: "toilets",
@@ -72,16 +75,52 @@ const POI_ICONS = {
   university: "university", college: "university",
 };
 
-/** The icons the sheets carry, so a name that is not there is caught here. */
-const SPRITE_ICONS = [
-  "aerodrome", "animal", "arrow", "artwork", "attraction", "bar", "beach", "beauty",
-  "bench", "books", "building", "bus_stop", "cafe", "capital", "clothes", "convenience",
-  "drinking_water", "electronics", "fast_food", "ferry_terminal", "forest", "garden",
-  "generic_shield-1char", "generic_shield-2char", "generic_shield-3char",
-  "generic_shield-4char", "generic_shield-5char", "library", "marina", "museum",
-  "park", "peak", "post_office", "restaurant", "school", "stadium", "supermarket",
-  "theatre", "toilets", "townspot", "train_station", "university", "zoo",
-];
+/**
+ * The icons the sheets carry, read from the sheets themselves.
+ *
+ * This was a hand-written list and it had drifted: it named `harbour` and `port`,
+ * which the sprite does not have. Both were asked for by the poi icon layer, which
+ * meant a 404 on the icon and no label at all for those features, because a symbol
+ * layer with an icon it cannot fetch suppresses the text with it. The only honest
+ * source for what the sprite has is the sprite.
+ */
+export function spriteIcons(sheets = ["light", "dark"]) {
+  const names = new Set();
+  for (const sheet of sheets) {
+    const path = join(ROOT, "assets", "sprites", "v4", `${sheet}.json`);
+    const doc = JSON.parse(readFileSync(path, "utf8"));
+    for (const name of Object.keys(doc)) names.add(name);
+  }
+  return [...names];
+}
+
+/**
+ * Every icon name a style asks for that the sprite does not have.
+ *
+ * A missing icon is the quietest failure in the style: the request 404s, the
+ * symbol layer drops the text label with it, and the feature is absent from the
+ * map rather than mislabelled on it. Nothing in the page reports it and nothing in
+ * the network log stands out, so it has to be caught here, against the real sheets.
+ */
+export function missingIcons(style, sheets = ["light", "dark"]) {
+  const available = new Set(spriteIcons(sheets));
+  const missing = new Set();
+  for (const layer of style.layers || []) {
+    const value = layer.layout && layer.layout["icon-image"];
+    if (value === undefined) continue;
+    const names = typeof value === "string"
+      ? [value]
+      : Array.isArray(value) && value[0] === "match"
+        // a match alternates label, value, label, value, and ends in a fallback
+        ? value.filter((_, i) => i > 1 && i % 2 === 1).concat(value[value.length - 1])
+        : [];
+    for (const name of names) {
+      if (typeof name !== "string" || name === "") continue;
+      if (!available.has(name)) missing.add(`${layer.id}: ${name}`);
+    }
+  }
+  return [...missing];
+}
 
 // Noto Sans Medium is what upstream Protomaps uses for bold, and it is the only
 // bold-ish stack in the OFL set we vendor. "Noto Sans Bold" does not exist there,
@@ -156,8 +195,17 @@ const shownAt = (zoom) => ["<=", ["get", "min_zoom"], zoom];
 // One id and its casing per road class. A stray id here names a layer that
 // does not exist, and the toggle that covers it silently does nothing.
 const PLACE_IDS = ROADS.flatMap(([id]) => [id, `${id}-casing`]);
+/**
+ * The `places` kinds this archive carries: country, region, locality, macrohood,
+ * neighbourhood. One id and its label layer for each.
+ *
+ * `settlement` was in this list and is gone. It is not one of the five kinds, so
+ * the layer it built drew nothing, in 2208 sampled tiles and nothing in a browser
+ * from z1 to z15. A layer for a kind the data does not have is dead code that
+ * looks load bearing.
+ */
 const PLACE_LAYER_IDS = [
-  "country", "region", "locality", "macrohood", "neighbourhood", "settlement",
+  "country", "region", "locality", "macrohood", "neighbourhood",
 ].map((kind) => `place-${kind}`);
 
 /**
@@ -180,14 +228,21 @@ export const TOGGLE_GROUPS = [
   // Icons. The styles drew none at all until now, and the sheets were published and
   // never referenced, which is the sprite version of the fonts problem.
   { id: "icons", label: "Icons", layers: ["poi-icon", "townspot"] },
-  // Shields and house numbers need fields the archive being served does not carry.
-  // They are built now and draw nothing until the next data refresh, which is when
-  // Protomaps started shipping shield_text and addr_housenumber. `needs` names the
-  // field each one is waiting for, and the page shows it, because a toggle that is
-  // correct and silent reads as broken.
-  { id: "shields", label: "Route shields", layers: ["road-shield"], needs: "roads.shield_text" },
-  { id: "address", label: "House numbers", layers: ["address-label"], needs: "buildings.addr_housenumber" },
 ];
+
+/**
+ * Layers that stay in the style but get no toggle.
+ *
+ * Both of these need a field the archive being served does not carry, and both
+ * drew nothing in 2208 sampled tiles and nothing in a browser at z1 through z15.
+ * A toggle for a layer that cannot draw is worse than no toggle: it looks broken
+ * and there is no way for a visitor to tell it from a real fault, which is the
+ * same problem the zoom badges exist to solve.
+ *
+ * They stay in the style, filtered on ["has", field], so they start drawing on
+ * their own the day a refresh brings the field in. No release, no second edit.
+ */
+export const TOGGLE_EXCLUSIONS = ["place-settlement", "road-shield", "address-label"];
 
 /**
  * The palette keys the page exposes as colour inputs, grouped for the form.
@@ -423,7 +478,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   });
 
   // ---- place labels ----
-  const PLACE_KINDS = ["country", "region", "locality", "macrohood", "neighbourhood", "settlement"];
+  const PLACE_KINDS = ["country", "region", "locality", "macrohood", "neighbourhood"];
 
   for (const [kind, minzoom, size, halo] of [
     ["country", 0, 13, 1.4],
@@ -431,7 +486,6 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     ["locality", 5, 11, 1.3],
     ["macrohood", 11, 10, 1.2],
     ["neighbourhood", 13, 10, 1.2],
-    ["settlement", 11, 10, 1.2],
   ]) {
     layers.push({
       id: `place-${kind}`,
@@ -994,6 +1048,18 @@ function main() {
     throw new Error(`defaultFlavor ${index.defaultFlavor} is not one of the flavours`);
   }
   writeFileSync(join(OUT, "index.json"), `${JSON.stringify(index, null, 2)}\n`);
+
+  // Checked once before any style is written: a name missing from the sprite is
+  // the same in every flavour and there is nothing to gain from failing three times.
+  const probe = renderTemplate(buildStyle("{{flavor}}", placeholderPalette()), FLAVORS.light, {});
+  const iconsMissing = missingIcons(probe);
+  if (iconsMissing.length) {
+    throw new Error(
+      `the style asks the sprite for ${iconsMissing.join(", ")}, which the sheets do not ` +
+      `have. A missing icon suppresses the label with it, so the feature would be ` +
+      `absent from the map rather than mislabelled on it.`
+    );
+  }
 
   for (const flavor of Object.keys(FLAVORS)) {
     const style = buildStyle(flavor);

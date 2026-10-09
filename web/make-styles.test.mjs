@@ -15,12 +15,13 @@
 import assert from "node:assert/strict";
 import { gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  buildStyle, renderTemplate, renderProblems, placeholderPalette, FLAVORS, SCHEMA, TILES_URL,
+  buildStyle, renderTemplate, renderProblems, missingIcons, spriteIcons,
+  placeholderPalette, TOGGLE_EXCLUSIONS, FLAVORS, SCHEMA, TILES_URL,
   CONTROLS, CONTROL_KEYS, TOGGLE_GROUPS, packEdits, unpackEdits, hasUnfilled,
 } from "./make-styles.mjs";
 
@@ -577,6 +578,50 @@ await check("a published style carries no placeholder", () => {
   }
 });
 
+await check("no layer is in a toggle and also excluded from one", () => {
+  // These are the three layers that stay in the style and get no toggle, and the
+  // page does not offer them. The test exists because the reverse mistake is easy:
+  // a toggle for a layer that cannot draw, which looks broken and invites the
+  // visitor to think the map is at fault.
+  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "bright.json"), "utf8"));
+  const ids = new Set(style.layers.map((l) => l.id));
+  for (const excluded of TOGGLE_EXCLUSIONS) {
+    // Two different reasons for the same state, and they are not interchangeable.
+    // place-settlement is gone outright, because its kind does not exist in the
+    // archive. The other two ship and are filtered on ["has", field], so they draw
+    // themselves when a refresh brings the field in.
+    if (excluded === "place-settlement") {
+      assert.ok(!ids.has(excluded), `${excluded} is back, and its kind is not in the archive`);
+    } else {
+      assert.ok(ids.has(excluded), `${excluded} is excluded but no longer in the style`);
+    }
+    const covered = TOGGLE_GROUPS.find((g) => g.layers.includes(excluded));
+    assert.ok(!covered, `${excluded} is excluded from the builder but still under a toggle`);
+  }
+  // And the builder payload does not carry them.
+  const builder = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "builder.json"), "utf8"));
+  const offered = new Set(builder.toggles.flatMap((t) => [t.id]));
+  for (const excluded of TOGGLE_EXCLUSIONS) {
+    assert.ok(![...offered].some((id) => id === excluded), `${excluded} still has a toggle`);
+  }
+  // The page itself no longer mentions a badge it cannot produce.
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(!page.includes("toggle.needs"), "the page still renders a needs badge");
+});
+
+await check("the towns kinds are the five the archive carries", () => {
+  // `settlement` was once in this list. It is not one of the five `places` kinds,
+  // so the layer it built drew nothing at all: zero features in 2208 sampled tiles
+  // and zero in a browser at z1 through z15. A layer for a kind the data does not
+  // have is dead code that reads as load bearing.
+  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "bright.json"), "utf8"));
+  const places = style.layers.filter((l) => l.id.startsWith("place-")).map((l) => l.id);
+  assert.deepEqual(places.sort(), [
+    "place-country", "place-locality", "place-macrohood", "place-neighbourhood", "place-region",
+  ], "the place layers are not the five archive kinds");
+  assert.ok(!places.includes("place-settlement"), "place-settlement is back, and it cannot draw");
+});
+
 await check("every layer has the fields MapLibre validates", () => {
   // This is the check that was missing when a map went blank with no error.
   //
@@ -689,6 +734,68 @@ await check("a layer waiting on a field names it, and the page says so", () => {
   assert.ok(page.includes("addr_housenumber"), "the page does not name the missing house number field");
   assert.ok(page.includes("shield_text"), "the page does not name the missing shield text field");
   assert.ok(page.includes("inside"), "the page does not say the address points are inside buildings");
+});
+
+await check("every icon the styles ask for is in the sprite", () => {
+  // A missing icon is the quietest failure in the style. The request 404s and a
+  // symbol layer with an icon it cannot fetch suppresses the text label with it, so
+  // the feature is absent from the map rather than mislabelled on it. Nothing in the
+  // network log stands out. This was found the same way: two names the sprite never
+  // had, asked for by every POI of that kind.
+  const icons = spriteIcons();
+  assert.ok(icons.length > 40, `only ${icons.length} icons read from the sprite`);
+  // And they are read from the sheets, not listed by hand, so they cannot drift.
+  const sheet = JSON.parse(readFileSync(join(HERE, "..", "assets", "sprites", "v4", "light.json"), "utf8"));
+  for (const name of icons) assert.ok(sheet[name] !== undefined, `${name} is not in light.json`);
+  for (const id of ["light", "bright", "dark"]) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const missing = missingIcons(style);
+    assert.deepEqual(missing, [], `${id}.json asks the sprite for ${missing.join(", ")}`);
+  }
+});
+
+await check("the sources the styles name, the glyphs and the sheets all exist", () => {
+  // The other three supports. A layer with data and no glyph is a layer with names
+  // in the tile and nothing on the map, so each is checked against the thing it is
+  // served from rather than against a list written here.
+  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "bright.json"), "utf8"));
+
+  // Glyphs: every font stack the style names must have a range on this host.
+  // Only text-font, which is the property that names a stack. Roaming the whole
+  // layout collects operators like coalesce, which are not font stacks.
+  const stacks = new Set();
+  for (const layer of style.layers) {
+    const value = (layer.layout || {})["text-font"];
+    if (typeof value === "string") stacks.add(value);
+    else if (Array.isArray(value)) for (const name of value) stacks.add(name);
+  }
+  // Nothing to check offline beyond that the stacks are the ones we publish.
+  for (const stack of stacks) {
+    assert.ok(
+      ["Noto Sans Regular", "Noto Sans Medium"].includes(stack),
+      `the style asks for the stack "${stack}", which is not one of the two published`
+    );
+  }
+
+  // Sprites: the sheet each flavour names is published, at 1x and 2x.
+  for (const id of ["light", "bright", "dark"]) {
+    const s = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const sheet = s.sprite.match(/sprites\/v4\/([a-z]+)$/)[1];
+    for (const variant of ["", "@2x"]) {
+      for (const ext of ["json", "png"]) {
+        assert.ok(
+          existsSync(join(HERE, "..", "public", "sprites", "v4", `${sheet}${variant}.${ext}`)),
+          `${id}.json points at ${sheet}${variant}.${ext}, which is not published`
+        );
+      }
+    }
+  }
+
+  // Vectors: every source-layer the style names is one of the nine in the archive.
+  const named = [...new Set(style.layers.filter((l) => l["source-layer"]).map((l) => l["source-layer"]))];
+  for (const layer of named) {
+    assert.ok(SCHEMA[layer], `the style reads source-layer "${layer}", which the archive does not have`);
+  }
 });
 
 console.log(`${passed} passed, ${failed} failed`);
