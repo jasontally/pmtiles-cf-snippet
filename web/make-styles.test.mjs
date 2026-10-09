@@ -391,6 +391,58 @@ await check("the builder sits with the map and edits that same map", () => {
   );
 });
 
+await check("one style pill, showing the style on the map", () => {
+  // There used to be three: a pill on the map that fetched the style the flavour
+  // button had picked, a block of JSON in the builder showing the style actually
+  // drawn, and a copy button that silently put it on the clipboard. Two of the three
+  // said "Style JSON" and showed different files the moment anything had been
+  // changed, which is a small lie rather than a convenience. One pill, one place, and
+  // it reads the live style.
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+
+  // No pill on the map any more. Archive metadata stays: it is the archive, not a
+  // style, and it is the one thing on that bar that is not about styling.
+  assert.ok(!page.includes('id="show-style"'), "there is still a style pill on the map");
+  assert.ok(page.includes('id="show-meta"'), "the archive metadata pill went with it");
+  assert.ok(page.includes('id="builder-copy">Style JSON<'),
+    "the builder's style pill is not labelled Style JSON");
+
+  // The inline JSON block is gone, so there is one copy of the style rather than one
+  // shown and one to keep in step.
+  assert.ok(!page.includes('id="builder-json"'), "the builder still writes JSON somewhere");
+
+  // The pill shows the style the map is drawing, not the selected one.
+  assert.ok(/showCurrentStyle\(\)/.test(page), "the pill does not open the current style");
+  assert.ok(/const style = currentStyle\(\);/.test(page),
+    "showCurrentStyle does not read the live style");
+
+  // And the dialog has its own copy button, so a copy does not need a second pill.
+  assert.ok(page.includes('id="style-copy"'), "the dialog has no copy button");
+  assert.ok(/\$\("style-copy"\)\.addEventListener/.test(page),
+    "the dialog's copy button is not wired");
+
+  // apply() refreshes what the dialog shows when a change happens with it open, so
+  // it cannot go stale while somebody is editing.
+  assert.ok(/if \(dialog\.open\) showCurrentStyle\(\);/.test(page),
+    "an edit with the dialog open does not refresh what it shows");
+});
+
+await check("the zoom control yields the corner to an error message", () => {
+  // It sits bottom left, because the attribution control owns the bottom right and
+  // the two overlapped. And it gives way when there is a message to show, because a
+  // message that says the tiles failed matters more than a number.
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(page.includes('id="zoomer"'), "the zoom control has no id to address");
+  assert.ok(/\.zoomer \{[^}]*bottom: \.6rem; left: \.6rem/.test(page),
+    "the zoom control is not in the lower left corner");
+  assert.ok(page.includes(".zoomer.yielding"), "the zoom control cannot be hidden");
+  assert.ok(/classList\.toggle\("yielding", Boolean\(text\)\)/.test(page),
+    "setHint does not yield the corner to its message");
+  // It must be visible when there is no message, or the fix has removed it.
+  assert.ok(/map\.on\("move", paintZoom\)/.test(page),
+    "the zoom readout does not follow the map, so it goes stale on any other input");
+});
+
 await check("the map centres on where the visitor is, and copes when it cannot", () => {
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   assert.ok(page.includes("https://latlon.jasontally.com/"), "the page does not ask for a location");

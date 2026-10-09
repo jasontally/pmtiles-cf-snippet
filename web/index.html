@@ -116,7 +116,7 @@
   /* Zoom, bottom right, where a reader looking at the map expects it. Stacked the
      other way from a usual control, with the level between the two buttons, so the
      level is the thing and the buttons frame it. */
-  .zoomer { position: absolute; bottom: .6rem; right: .6rem; z-index: 2; display: flex;
+  .zoomer { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; display: flex;
     align-items: center; gap: .1rem; background: rgba(255,255,255,.92); color: #24231f;
     border: 1px solid rgba(0,0,0,.12); border-radius: 999px; padding: .1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,.18); font-size: .8rem; }
@@ -126,6 +126,8 @@
   .zoomer button:disabled { opacity: .35; cursor: default; background: none; }
   #zoom-readout { min-width: 2.2rem; text-align: center; font-variant-numeric: tabular-nums;
     font-weight: 600; padding: 0 .15rem; }
+  /* The error message owns that corner when there is one. */
+  .zoomer.yielding { display: none; }
 
   /* The map and the builder, side by side when there is room for both.
      Sticky on the map so a colour change is something you watch happen: without
@@ -182,6 +184,8 @@
   .dlg-head .grow { flex: 1; }
   .dlg-body { padding: 0 1.1rem 1.1rem; overflow: auto; max-height: calc(82vh - 3.4rem); }
   .dlg-body pre { border: 0; padding: 1.1rem 0 0; }
+  #style-copy { font: inherit; font-size: .85rem; padding: .3rem .7rem; border-radius: 999px;
+    cursor: pointer; background: var(--accent); color: #fff; border-color: transparent; }
 
   table { border-collapse: collapse; width: 100%; font-size: .9rem; }
   th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
@@ -231,21 +235,29 @@
         <div class="mapbar">
           <div class="flavors" id="flavors" role="group" aria-label="Style"></div>
           <div class="tools">
-            <button type="button" id="show-style">Style JSON</button>
+            <!-- One pill for the style, in the builder beside the map. It carries the
+                 style actually on screen, customisations included, which is what
+                 somebody wants to copy. The pill that was here showed the style the
+                 flavour button had selected, which is a different thing and not the
+                 thing being looked at. -->
             <button type="button" id="show-meta">Archive metadata</button>
           </div>
         </div>
-        <!-- Zoom. The readout is not decoration: a layer that starts at z15 is
-             invisible at z6, and testing that needs to know which zoom you are
-             at. It listens to the map's own zoom and move events, so it is right
-             no matter what moved it: these buttons, a scroll, a pinch, a
-             double-click, or the keyboard. -->
-        <div class="zoomer">
+        <!-- Lower left, not lower right: the attribution control owns the lower
+             right, and the two overlapped. The zoom readout is not decoration: a
+             layer that starts at z15 is invisible at z6, and telling one of those
+             from the other needs the number. It follows the map's own zoom and
+             move events, so it is right no matter what moved it: these buttons, a
+             scroll, a pinch, a double-click, or the keyboard.
+
+             It yields the corner to the error message when there is one, because a
+             message that says tiles failed is more important than a number. -->
+        <span class="maphint" id="maphint"></span>
+        <div class="zoomer" id="zoomer">
           <button type="button" id="zoom-out" aria-label="Zoom out">&minus;</button>
           <span id="zoom-readout" title="Zoom level. The archive holds z0 to z15.">z0</span>
           <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
         </div>
-        <span class="maphint" id="maphint"></span>
       </div>
     </div>
 
@@ -269,7 +281,7 @@
         </div>
         <div id="builder-colors"></div>
         <div class="builder-actions">
-          <button type="button" id="builder-copy">Copy style JSON</button>
+          <button type="button" id="builder-copy">Style JSON</button>
           <button type="button" id="builder-download">Download</button>
           <button type="button" id="builder-share">Copy share link</button>
           <button type="button" id="builder-reset">Reset</button>
@@ -277,10 +289,6 @@
         </div>
       </div>
 
-      <details class="builder-side">
-        <summary>Style JSON</summary>
-        <pre id="builder-json"></pre>
-      </details>
       <div class="builder-status" id="builder-note"></div>
     </div>
   </div>
@@ -596,11 +604,11 @@ console.log(tile.data.byteLength);</code></pre>
   <div class="dlg-head">
     <h3 id="style-title">Style JSON</h3>
     <span class="grow"></span>
+    <button type="button" id="style-copy">Copy</button>
     <a id="style-raw" href="#" target="_blank" rel="noopener">open raw</a>
     <button type="button" id="style-close">Close</button>
   </div>
   <div class="dlg-body"><pre id="style-json"></pre></div>
-</dialog>
 
 <script type="module">
 import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/render-template.mjs";
@@ -616,6 +624,10 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   // What the map is showing now, so an edit sends only what changed. Null until
   // the first apply, which is the one time a whole style is loaded.
   let appliedStyle = null;
+
+  // The one dialog. Up here rather than beside the viewers because apply() checks
+  // whether it is open, and apply() is defined first.
+  const dialog = $("style-dialog");
 
   // The archive is a PMTiles file, so read its own metadata rather than
   // hard-coding the layer names on this page.
@@ -648,7 +660,14 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     paintZoom();
   }
 
-  function setHint(text) { $("maphint").textContent = text; }
+  function setHint(text) {
+    $("maphint").textContent = text;
+    // The zoom control lives in the same corner and gives way. A message that
+    // says the tiles failed is worth more than a number, and two things stacked
+    // on top of each other is how the first version ended up sitting under the
+    // OpenStreetMap credit.
+    $("zoomer").classList.toggle("yielding", Boolean(text));
+  }
 
   function countSourceEvents(mapInstance) {
     let failed = 0;
@@ -921,10 +940,11 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     // A half rendered style would draw with literal {{water}} colours. Show the
     // mistake rather than hide it.
     const broken = hasUnfilled(style);
-    $("builder-json").textContent = broken
-      ? "// BUG: a colour is unfilled, so this style is not valid:\n" +
-        JSON.stringify(style, null, 2)
-      : JSON.stringify(style, null, 2);
+    // The JSON is not written anywhere any more. It used to go into a block in the
+    // builder that duplicated the dialog, and two copies of the same style is two
+    // places to keep in step. The dialog is the one place now, and it reads the live
+    // style when it opens. If it is already open, this keeps what it shows current.
+    if (dialog.open) showCurrentStyle();
     $("builder-note").innerHTML = broken
       ? "A colour is unfilled. Reset, then change one thing at a time."
       : `<strong>${Object.keys(builder.show).length === 0 ? "No edits yet." :
@@ -1058,23 +1078,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     }
   }
 
-  $("builder-copy").addEventListener("click", async () => {
-    const text = JSON.stringify(currentStyle(), null, 2);
-    try {
-      await navigator.clipboard.writeText(text);
-      say(`copied ${text.length.toLocaleString()} characters`);
-    } catch {
-      // Clipboard needs a secure context and permission. Fall back to a selection
-      // the user can copy by hand rather than failing silently.
-      const pre = $("builder-json");
-      const range = document.createRange();
-      range.selectNodeContents(pre);
-      const selection = getSelection();
-      selection.removeAllRanges();
-      selection.addRange(range);
-      say("could not use the clipboard, so the JSON below is selected instead");
-    }
-  });
 
   $("builder-download").addEventListener("click", () => {
     const blob = new Blob([JSON.stringify(currentStyle(), null, 2)], { type: "application/json" });
@@ -1135,22 +1138,63 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     }
   }
 
-  // ---- the JSON viewers ----
-  const dialog = $("style-dialog");
-  async function showJson(title, url) {
+  // ---- the JSON viewer ----
+  //
+  // One dialog, and for a style it shows one thing: the style the map is drawing.
+  // The pill in the map's corner used to fetch the style the flavour button had
+  // selected, which is a different document from the one on screen the moment
+  // anything in the builder has been touched, and two pills both saying "Style
+  // JSON" that show different files is a small lie rather than a convenience.
+
+  /**
+   * Show a style in the dialog. `text` for JSON already held here, `url` for a
+   * file to fetch. The copy button takes whatever is in the box at the time, so it
+   * works for either without needing to know which.
+   */
+  function showStyle(title, text, url) {
     $("style-title").textContent = title;
-    $("style-raw").href = url;
-    $("style-json").textContent = "loading…";
+    if (url) $("style-raw").href = url;
+    else $("style-raw").removeAttribute("href");
+    $("style-json").textContent = text;
     dialog.showModal();
-    try {
-      const text = await (await fetch(url)).text();
-      $("style-json").textContent = JSON.stringify(JSON.parse(text), null, 2);
-    } catch (error) {
-      $("style-json").textContent = "could not load " + url + ": " + error;
-    }
   }
-  $("show-style").addEventListener("click", () =>
-    showJson("Style JSON — " + current.label, current.url));
+
+  /** The pill in the builder. Shows what is on the map, customisations included. */
+  function showCurrentStyle() {
+    // currentStyle() renders the template with the current edits, which is the
+    // same object the map is showing and the same one the download button writes.
+    const style = currentStyle();
+    const broken = hasUnfilled(style);
+    const flavour = flavors.find((f) => f.id === builder.baseId);
+    const title = flavour
+      ? `Style JSON — ${flavour.label}${Object.keys(builder.show).length ? ", customised" : ""}`
+      : "Style JSON";
+    showStyle(
+      broken ? "Style JSON — a colour is unfilled" : title,
+      JSON.stringify(style, null, 2)
+    );
+  }
+
+  $("builder-copy").addEventListener("click", showCurrentStyle);
+
+  $("style-copy").addEventListener("click", async () => {
+    const text = $("style-json").textContent;
+    try {
+      await navigator.clipboard.writeText(text);
+      $("style-copy").textContent = "Copied";
+      setTimeout(() => { $("style-copy").textContent = "Copy"; }, 1500);
+    } catch {
+      // Clipboard needs a secure context and permission. Say so rather than
+      // leaving the button that looks inert.
+      $("style-copy").textContent = "Select and copy";
+      const range = document.createRange();
+      range.selectNodeContents($("style-json"));
+      const selection = getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    }
+  });
+
   $("show-meta").addEventListener("click", async () => {
     $("style-title").textContent = "Archive metadata";
     $("style-raw").removeAttribute("href");
