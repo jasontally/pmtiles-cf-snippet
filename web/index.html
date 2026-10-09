@@ -105,8 +105,13 @@
     background: rgba(255,255,255,.94); color: #24231f; border: 1px solid rgba(0,0,0,.12);
     box-shadow: 0 1px 3px rgba(0,0,0,.18);
   }
+  /* An error indicator, not decoration. It starts empty and a map that is
+     working shows nothing, which is the point: a pill over the corner of a map
+     that is fine is clutter, and the one that was there repeated the hostname
+     already in the URL bar and a rough location nobody asked to see. */
   .maphint { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
     font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
+  .maphint:empty { display: none; }
 
   /* The map and the builder, side by side when there is room for both.
      Sticky on the map so a colour change is something you watch happen: without
@@ -216,7 +221,7 @@
             <button type="button" id="show-meta">Archive metadata</button>
           </div>
         </div>
-        <span class="maphint" id="maphint">loading tiles…</span>
+        <span class="maphint" id="maphint"></span>
       </div>
     </div>
 
@@ -673,9 +678,10 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
 
     const failed = countSourceEvents(map);
     map.on("idle", () => {
-      if (failed() === 0) {
-        setHint("tiles from tiles.jasontally.com" + (place.approximate ? " · near " + place.label : ""));
-      } else setHint(failed() + " tile request(s) failed, see the browser console");
+      // Nothing said when it works. A map that loads correctly needs no caption.
+      if (failed() > 0) {
+        setHint(failed() + " tile request(s) failed, see the browser console");
+      }
     });
 
     loadSchema();
@@ -695,7 +701,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
    * to show a map is worse than a map of the world.
    */
   async function where() {
-    const WORLD = { center: [0, 18], zoom: 2.4, approximate: false, label: "" };
+    const WORLD = { center: [0, 18], zoom: 2.4 };
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2500);
     try {
@@ -706,12 +712,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       const [lat, lon] = (await response.text()).split(",").map(Number);
       if (!Number.isFinite(lat) || !Number.isFinite(lon)) return WORLD;
       if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return WORLD;
-      return {
-        center: [lon, lat],
-        zoom: 5,
-        approximate: true,
-        label: `${Math.abs(lat).toFixed(2)}°, ${Math.abs(lon).toFixed(2)}°`,
-      };
+      return { center: [lon, lat], zoom: 5 };
     } catch {
       return WORLD;
     } finally {
@@ -734,10 +735,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       apply();
     } else {
       map.setStyle(flavor.url);
-        // Forget what we thought was on screen, or the first builder edit
-        // would diff against a style that is no longer there.
+          // Forget what we thought was on screen, or the first builder edit
+          // would diff against a style that is no longer there.
         appliedStyle = null;
-      setHint("loading tiles…");
     }
   }
 
