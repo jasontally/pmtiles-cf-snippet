@@ -577,6 +577,57 @@ await check("a published style carries no placeholder", () => {
   }
 });
 
+await check("every layer has the fields MapLibre validates", () => {
+  // This is the check that was missing when a map went blank with no error.
+  //
+  // MapLibre validates a style before it loads one. A layer with no `type` fails
+  // that validation, and a style that fails it is not loaded at all: not the
+  // sources, not the sprite, not the layers, nothing. No request fails, nothing
+  // goes red in the network log, and the map simply sits there. The only hint is
+  // a tile count of two and no glyph request ever being made.
+  //
+  // So each of these is checked on the styles that ship, not only on the template.
+  for (const id of ["light", "bright", "dark"]) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const ids = style.layers.map((l) => l.id);
+    assert.equal(new Set(ids).size, ids.length, `${id}.json has duplicate layer ids`);
+
+    for (const layer of style.layers) {
+      assert.ok(layer.id, `${id}.json has a layer with no id`);
+      assert.ok(layer.type, `${id}.json layer ${layer.id} has no type`);
+      // A background layer paints the page behind everything and has no source.
+      if (layer.type !== "background") {
+        assert.ok(layer.source, `${id}.json layer ${layer.id} has no source`);
+      }
+      // A symbol or fill layer needs to know which layer of the tile to read.
+      if (layer.type !== "background") {
+        assert.ok(layer["source-layer"], `${id}.json layer ${layer.id} has no source-layer`);
+      }
+      assert.ok(typeof layer.type === "string" && layer.type.length > 0,
+        `${id}.json layer ${layer.id} type is ${JSON.stringify(layer.type)}`);
+      if (layer.visibility) {
+        assert.ok(["visible", "none"].includes(layer.visibility),
+          `${id}.json layer ${layer.id} visibility ${layer.visibility}`);
+      }
+      if (layer.minzoom !== undefined) {
+        assert.ok(Number.isInteger(layer.minzoom) && layer.minzoom >= 0,
+          `${id}.json layer ${layer.id} minzoom ${layer.minzoom}`);
+      }
+    }
+
+    // Sources the layers name must exist. A background layer names none.
+    for (const source of Object.values(style.sources || {})) {
+      assert.ok(source.url, `${id}.json has a source with no url`);
+    }
+    const named = new Set(Object.keys(style.sources || {}));
+    for (const layer of style.layers) {
+      if (layer.type === "background") continue;
+      assert.ok(named.has(layer.source),
+        `${id}.json layer ${layer.id} names source ${layer.source}, which is not in the style`);
+    }
+  }
+});
+
 await check("the roads filter on kind, not on kind_detail", () => {
   // This is the bug that had the public map drawing no roads at all. The class names
   // in the upstream documentation — motorway, trunk, primary, residential — are
