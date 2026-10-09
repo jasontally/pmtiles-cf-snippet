@@ -662,11 +662,12 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   // thing to fetch. Same `has` test, same reasoning.
   layers.push({
     id: "address-label",
-    type: "symbol",
-    source: SOURCE_NAME,
-    "source-layer": "buildings",
-    filter: ["all", ["has", "addr_housenumber"], ["==", ["get", "kind"], "address"]],
-    minzoom: 18,
+    // minzoom 15, not 18. The archive stops at z15, and a layer whose minzoom is
+    // above the tile's zoom is never drawn at all, so this would have stayed dark
+    // even after the field arrived, and the failure would have looked exactly like
+    // the data missing when it was not.
+      filter: ["all", ["has", "addr_housenumber"], ["==", ["get", "kind"], "address"]],
+    minzoom: 15,
     layout: {
       "text-field": ["get", "addr_housenumber"],
       "text-font": FONT,
