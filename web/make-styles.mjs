@@ -23,6 +23,7 @@ import { dirname, join } from "node:path";
 // The renderer is shared with the browser, so the page and the build agree.
 export { renderTemplate, hasUnfilled, packEdits, unpackEdits } from "./render-template.mjs";
 import { fileURLToPath } from "node:url";
+import { renderTemplate } from "./render-template.mjs";
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), "..");
 const OUT = process.argv[2] || join(ROOT, "public", "styles");
@@ -54,6 +55,34 @@ export const GLYPHS = "https://tiles.jasontally.com/font/{fontstack}/{range}.pbf
 // /sprites/LICENSE.md.
 export const SPRITES = "https://tiles.jasontally.com/sprites/v4";
 
+const POI_ICONS = {
+  aerodrome: "aerodrome", airport: "aerodrome", airfield: "aerodrome",
+  animal: "animal", zoo: "zoo", artwork: "artwork", art: "artwork",
+  attraction: "attraction", bar: "bar", cafe: "cafe", fast_food: "fast_food",
+  restaurant: "restaurant", bench: "bench", beach: "beach", beauty: "beauty",
+  books: "books", library: "library", bookmaker: "books",
+  building: "building", bus_stop: "bus_stop", clothes: "clothes",
+  convenience: "convenience", drinking_water: "drinking_water",
+  electronics: "electronics", forest: "forest", garden: "garden",
+  marina: "marina", harbour: "harbour", port: "port", ferry_terminal: "ferry_terminal",
+  museum: "museum", park: "park", national_park: "park", peak: "peak",
+  post_office: "post_office", school: "school", stadium: "stadium",
+  supermarket: "supermarket", theatre: "theatre", toilets: "toilets",
+  train_station: "train_station", station: "train_station", railway_station: "train_station",
+  university: "university", college: "university",
+};
+
+/** The icons the sheets carry, so a name that is not there is caught here. */
+const SPRITE_ICONS = [
+  "aerodrome", "animal", "arrow", "artwork", "attraction", "bar", "beach", "beauty",
+  "bench", "books", "building", "bus_stop", "cafe", "capital", "clothes", "convenience",
+  "drinking_water", "electronics", "fast_food", "ferry_terminal", "forest", "garden",
+  "generic_shield-1char", "generic_shield-2char", "generic_shield-3char",
+  "generic_shield-4char", "generic_shield-5char", "library", "marina", "museum",
+  "park", "peak", "post_office", "restaurant", "school", "stadium", "supermarket",
+  "theatre", "toilets", "townspot", "train_station", "university", "zoo",
+];
+
 // Noto Sans Medium is what upstream Protomaps uses for bold, and it is the only
 // bold-ish stack in the OFL set we vendor. "Noto Sans Bold" does not exist there,
 // which is the other half of why the glyphs had to come from the demo host.
@@ -77,16 +106,40 @@ export const SCHEMA = {
   water: [0, 15],
 };
 
-/** [id, kind values, first zoom, line width] for each road class. */
+/**
+ * [id, the `kind` value, first zoom, line width] for each road class.
+ *
+ * `kind`, not `kind_detail`. This was wrong for most of this project's life. The
+ * fine-grained class names from the upstream documentation — motorway, trunk,
+ * primary, residential — are `kind_detail` values, and the map was filtering
+ * `kind` against them. So the public map drew paths and railways, which share
+ * their `kind` name with the filter, and drew no motorway, no primary road, no
+ * residential street and no service road at all.
+ *
+ * `roads.kind` is the coarse class and it is one of five values: highway,
+ * major_road, minor_road, path, rail.
+ *
+ * Nothing caught this. Every layer loaded, every request succeeded, and the map
+ * looked like a map. The only way to see it is to ask the map what it drew, which
+ * is what tools/check-style.mjs does and what every offline check failed to.
+ */
 const ROADS = [
-  ["road-highway", ["motorway", "trunk"], 3, 2.2],
-  ["road-major", ["primary"], 4, 1.7],
-  ["road-medium", ["secondary", "tertiary"], 5, 1.2],
-  ["road-minor", ["residential", "unclassified", "living_street"], 7, 0.8],
-  ["road-service", ["service", "road"], 10, 0.4],
-  ["road-path", ["footway", "path", "cycleway", "steps", "pedestrian"], 12, 0.35],
-  ["road-rail", ["rail", "light_rail", "subway", "tram", "narrow_gauge"], 11, 0.5],
+  ["road-highway", ["highway"], 3, 2.2],
+  ["road-major", ["major_road"], 4, 1.7],
+  ["road-minor", ["minor_road"], 7, 0.8],
+  ["road-path", ["path"], 12, 0.35],
+  ["road-rail", ["rail"], 11, 0.5],
 ];
+
+/**
+ * A road class narrowed by its fine-grained `kind_detail`.
+ *
+ * The two are different vocabularies on the same feature, so a class is "this kind,
+ * and not that detail". A service road is kind_detail=service inside kind=minor_road.
+ */
+const roadFilter = (kinds, detailNot) =>
+  ["all", ["match", ["get", "kind"], kinds, true, false],
+    ["!=", ["get", "kind_detail"], detailNot]];
 
 /** [id, kind values] for the water features that are lines, not polygons. */
 const WATER_LINES = [["river", "stream", "canal", "drain", "ditch"]];
@@ -121,6 +174,19 @@ export const TOGGLE_GROUPS = [
   { id: "roads", label: "Roads", layers: PLACE_IDS },
   { id: "buildings", label: "Buildings", layers: ["buildings"] },
   { id: "labels", label: "Place labels", layers: [...PLACE_LAYER_IDS, "poi"] },
+  // Names of things. A map with shapes and no names is a background.
+  { id: "waterNames", label: "Water names", layers: ["water-label-ocean", "water-label-lake", "water-label-river"] },
+  { id: "roadLabels", label: "Road names", layers: ["road-label-major", "road-label-mid", "road-label-local"] },
+  // Icons. The styles drew none at all until now, and the sheets were published and
+  // never referenced, which is the sprite version of the fonts problem.
+  { id: "icons", label: "Icons", layers: ["poi-icon", "townspot"] },
+  // Shields and house numbers need fields the archive being served does not carry.
+  // They are built now and draw nothing until the next data refresh, which is when
+  // Protomaps started shipping shield_text and addr_housenumber. `needs` names the
+  // field each one is waiting for, and the page shows it, because a toggle that is
+  // correct and silent reads as broken.
+  { id: "shields", label: "Route shields", layers: ["road-shield"], needs: "roads.shield_text" },
+  { id: "address", label: "House numbers", layers: ["address-label"], needs: "buildings.addr_housenumber" },
 ];
 
 /**
@@ -396,13 +462,17 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     "marina", "harbour", "port", "stadium", "aquarium", "library",
   ];
 
+  // Only the kinds with no icon. poi-icon carries the rest, so a point of place is
+  // labelled once and not twice.
+  const NAMED_ONLY_KINDS = POI_KINDS.filter((kind) => !(kind in POI_ICONS));
+
   layers.push({
     id: "poi",
     type: "symbol",
     source: SOURCE_NAME,
     "source-layer": "pois",
     minzoom: 11,
-    filter: ["all", inKind(POI_KINDS), shownAt(12)],
+    filter: ["all", inKind(NAMED_ONLY_KINDS), shownAt(12)],
     layout: {
       "text-field": NAME,
       "text-font": FONT,
@@ -412,6 +482,199 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       "text-max-width": 8,
     },
     paint: { "text-color": p.poiLabel, "text-halo-color": p.halo, "text-halo-width": 1.2 },
+  });
+
+
+  // ---- names of water ----
+  //
+  // The map drew water and named none of it. Every ocean, lake and river was an
+  // unnamed shape, which is the most obvious thing a basemap does and this was not.
+  //
+  // Split by zoom rather than by kind, because the name worth showing at each zoom
+  // is a different feature: an ocean name belongs at the bottom of the range, a
+  // lake appears once you are zoomed in, and a river is only a label once there is
+  // room.
+  for (const [id, kinds, minzoom, size] of [
+    ["water-label-ocean", ["ocean"], 0, 12.5],
+    ["water-label-lake", ["lake", "reservoir", "playa", "bay", "strait", "sea"], 6, 11],
+    ["water-label-river", ["river", "stream", "canal"], 9, 10],
+  ]) {
+    const isRiver = id === "water-label-river";
+    layers.push({
+      id,
+      type: "symbol",
+      source: SOURCE_NAME,
+      "source-layer": "water",
+      filter: inKind(kinds),
+      minzoom,
+      layout: {
+        "text-field": NAME,
+        "text-font": FONT,
+        "text-size": ["interpolate", ["linear"], ["zoom"], minzoom, size * 0.7, minzoom + 3, size],
+        // A river name follows the river. Everything else is read flat.
+        "text-rotation-alignment": isRiver ? "map" : "viewport",
+        "symbol-placement": isRiver ? "line" : "point",
+        "text-offset": [0, isRiver ? 0.9 : 0],
+        "text-anchor": "top",
+        "text-max-width": 8,
+        "text-letter-spacing": id === "water-label-ocean" ? 0.14 : 0,
+      },
+      paint: { "text-color": p.label, "text-halo-color": p.halo, "text-halo-width": 1.1 },
+    });
+  }
+
+  // ---- names of roads ----
+  //
+  // Three layers rather than one, because road names have to reappear as you zoom
+  // in: a motorway from z11, a mid road from z13 and a street only at z15, and one
+  // layer has one minzoom. Filtered on `kind`, the coarse class, not on the
+  // kind_detail names, for the reason set out on ROADS.
+  for (const [id, kinds, minzoom, size] of [
+    ["road-label-major", ["highway", "major_road"], 11, 10.5],
+    ["road-label-mid", ["minor_road"], 13, 10],
+    ["road-label-local", ["minor_road"], 15, 9.5],
+  ]) {
+    layers.push({
+      id,
+      type: "symbol",
+      source: SOURCE_NAME,
+      "source-layer": "roads",
+      filter: ["all", inKind(kinds), shownAt(minzoom)],
+      minzoom,
+      layout: {
+        "text-field": NAME,
+        "text-font": FONT,
+        "text-size": size,
+        "symbol-placement": "line",
+        "symbol-spacing": 250,
+        "text-rotation-alignment": "map",
+        "text-max-width": 6,
+        "text-padding": 1,
+      },
+      paint: { "text-color": p.label, "text-halo-color": p.halo, "text-halo-width": 1.1 },
+    });
+  }
+
+  // ---- icons on points of place, and a townspot ----
+  //
+  // An icon with the name under it. Only the kinds with an icon reach this layer,
+  // so a label is never drawn twice: the poi layer below carries the ones without.
+  //
+  // POI_ICONS flattened into the alternating label and value pairs a `match`
+  // expression takes. Spelling it any other way gives an expression MapLibre
+  // refuses, which takes the whole style down and leaves a blank map with nothing
+  // on the page to say why.
+  const ICON_KINDS = Object.keys(POI_ICONS).filter((kind) => POI_KINDS.includes(kind));
+  layers.push({
+    id: "poi-icon",
+    type: "symbol",
+    source: SOURCE_NAME,
+    "source-layer": "pois",
+    filter: ["all", inKind(ICON_KINDS), shownAt(13)],
+    minzoom: 13,
+    layout: {
+      "icon-image": ["match", ["get", "kind"], ...Object.entries(POI_ICONS).flat(), ""],
+      "text-field": NAME,
+      "text-font": FONT,
+      "text-size": ["interpolate", ["linear"], ["zoom"], 13, 9.5, 16, 11],
+      "text-offset": [0, 0.9],
+      "text-anchor": "top",
+      "text-max-width": 8,
+      "icon-allow-overlap": false,
+    },
+    paint: { "text-color": p.poiLabel, "text-halo-color": p.halo, "text-halo-width": 1.1 },
+  });
+
+  // A dot where people are, which survives a crowded map and makes an unfamiliar
+  // area readable at a glance.
+  layers.push({
+    id: "townspot",
+    type: "symbol",
+    source: SOURCE_NAME,
+    "source-layer": "places",
+      // `kind_detail`, not `kind`. The places layer puts the size in kind_detail —
+      // town, village, hamlet, suburb, quarter — while kind is one of country, region,
+      // locality, macrohood, neighbourhood. The first version filtered `kind` against
+      // the size names and drew nothing, the same mistake the road filters made.
+      filter: ["all",
+        ["match", ["get", "kind_detail"],
+          ["town", "village", "hamlet", "suburb", "quarter"], true, false],
+        [">", ["coalesce", ["get", "population"], 0], 0]],
+    minzoom: 8,
+    layout: {
+      "icon-image": "townspot",
+      "text-field": NAME,
+      "text-font": FONT,
+      "text-size": 11,
+      "text-offset": [0, 0.9],
+      "text-anchor": "top",
+      "text-max-width": 8,
+    },
+    paint: { "text-color": p.label, "text-halo-color": p.halo, "text-halo-width": 1.1 },
+  });
+
+  // ---- route shields ----
+  //
+  // Waits for roads.shield_text, which the archive being served does not carry. It
+  // has shield_text_length, which is how many characters the number is and not what
+  // they are, so a shield drawn from that would be a blank shape on every motorway.
+  //
+  // `has` is what makes waiting safe. `["get", "shield_text"]` on an absent property
+  // is null, and null compares equal to a disheartening number of things, so the
+  // usual filter would match everything. `has` is true only when the property is
+  // genuinely there, so this draws nothing today and draws itself the moment the
+  // archive is refreshed.
+  layers.push({
+    id: "road-shield",
+    type: "symbol",
+    source: SOURCE_NAME,
+    "source-layer": "roads",
+    filter: ["all", ["has", "shield_text"], inKind(["highway", "major_road"])],
+    minzoom: 7,
+    layout: {
+      // Which of the five shield blanks to use, by how long the number is. The
+      // blanks are different widths, and the wrong one puts a four digit number in
+      // a two digit shape.
+      "icon-image": ["match", ["length", ["coalesce", ["get", "shield_text"], ""]],
+        1, "generic_shield-1char",
+        2, "generic_shield-2char",
+        3, "generic_shield-3char",
+        4, "generic_shield-4char",
+        "generic_shield-5char"],
+      "text-field": ["get", "shield_text"],
+      "text-font": FONT_BOLD,
+      "text-size": 9,
+      "text-allow-overlap": true,
+      "icon-allow-overlap": true,
+      "text-rotation-alignment": "map",
+    },
+    paint: {
+      "text-color": p.label,
+      "text-halo-color": p.halo,
+      "text-halo-width": 1.1,
+    },
+  });
+
+  // ---- house numbers ----
+  //
+  // Waits for buildings.addr_housenumber. Not a separate source layer: Protomaps
+  // puts address points inside buildings with kind=address, so there is no second
+  // thing to fetch. Same `has` test, same reasoning.
+  layers.push({
+    id: "address-label",
+    type: "symbol",
+    source: SOURCE_NAME,
+    "source-layer": "buildings",
+    filter: ["all", ["has", "addr_housenumber"], ["==", ["get", "kind"], "address"]],
+    minzoom: 18,
+    layout: {
+      "text-field": ["get", "addr_housenumber"],
+      "text-font": FONT,
+      "text-size": 9,
+      "text-allow-overlap": true,
+      "text-anchor": "center",
+    },
+    paint: { "text-color": p.label, "text-halo-color": p.halo, "text-halo-width": 1 },
   });
 
   // A page toggle has to set `visibility` on every layer in the group, because
@@ -438,10 +701,10 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     bearing: 0,
     pitch: 0,
     glyphs: GLYPHS,
-    // No sprite here on purpose. A style that names one has MapLibre fetch it, and
-    // these layers draw no icons, so it would be a request for nothing. It is
-    // published anyway for anyone adding icon layers, and the documentation says
-    // where.
+    // Icons. Absent for most of this project's life, while the sheets were published
+    // and nothing referenced them. Naming one has MapLibre fetch the sheet and its
+    // JSON, which only pays off now that icon layers use it.
+    sprite: `${SPRITES}/${p.sprite || "light"}`,
     sources: {
       [SOURCE_NAME]: {
         type: "vector",
@@ -468,6 +731,10 @@ export const FLAVORS = {
   light: {
     name: "Light",
     swatch: "#f8f4f0",
+    // Which sprite sheet. Not a colour, so the page never shows it as an input, but
+    // it travels with the palette so that template + palette == shipped style stays
+    // true for the sprite as well as for the colours.
+    sprite: "light",
     background: "#f8f4f0",
     earth: "#f6f2ec",
     rock: "#e8e2d8",
@@ -500,6 +767,7 @@ export const FLAVORS = {
   bright: {
     name: "Bright",
     swatch: "#fdfdfb",
+    sprite: "light",
     background: "#fdfdfb",
     earth: "#fbfaf6",
     rock: "#eee8dc",
@@ -531,6 +799,7 @@ export const FLAVORS = {
   },
   dark: {
     name: "Dark",
+    sprite: "dark",
     swatch: "#26282b",
     background: "#1c1e21",
     earth: "#24262a",
@@ -655,6 +924,23 @@ ${rows}
 `;
 }
 
+/**
+ * Every placeholder left in a rendered style. An empty array is the answer we want.
+ *
+ * An earlier version of this shipped all three styles with `{{show:roads}}` sitting
+ * in their visibility, because buildStyle writes that and the shipped files were
+ * written straight from buildStyle. Nothing caught it. MapLibre fell back to the
+ * default for an unrecognised visibility and the map looked fine, so the only way it
+ * could ever have been found was somebody reading the JSON they had copied.
+ */
+export function renderProblems(style) {
+  const found = new Set();
+  for (const match of JSON.stringify(style).matchAll(/\{\{([a-zA-Z0-9:_-]+)\}\}/g)) {
+    found.add(match[1]);
+  }
+  return [...found];
+}
+
 function main() {
   mkdirSync(OUT, { recursive: true });
 
@@ -707,7 +993,20 @@ function main() {
 
   for (const flavor of Object.keys(FLAVORS)) {
     const style = buildStyle(flavor);
-    const text = `${JSON.stringify(style, null, 2)}\n`;
+    // Rendered before it is written, so a shipped style has no placeholder in it.
+    // The page's builder and this file use the same renderer, so the style a
+    // developer copies is the style the map draws.
+    const rendered = renderTemplate(style, FLAVORS[flavor], {});
+    const problems = renderProblems(rendered);
+    if (problems.length) {
+      throw new Error(`${flavor}.json would ship with ${problems.join(", ")} in it`);
+    }
+    for (const layer of rendered.layers) {
+      if (layer.visibility && !["visible", "none"].includes(layer.visibility)) {
+        throw new Error(`${flavor}.json layer ${layer.id} has visibility ${layer.visibility}`);
+      }
+    }
+    const text = `${JSON.stringify(rendered, null, 2)}\n`;
     writeFileSync(join(OUT, `${flavor}.json`), text);
     console.log(`  ${flavor}.json  ${Buffer.byteLength(text).toLocaleString()} bytes, ${style.layers.length} layers`);
   }
@@ -729,7 +1028,14 @@ function main() {
     palettes: FLAVORS,
     controls: CONTROLS,
     controlKeys: CONTROL_KEYS,
-    toggles: TOGGLE_GROUPS.map(({ id, label }) => ({ id, label, minzoom: groupMinzoom(template, id) })),
+    toggles: TOGGLE_GROUPS.map(({ id, label, needs }) => ({
+      id,
+      label,
+      minzoom: groupMinzoom(template, id),
+      // Carried through so the page can say a layer is waiting on a field rather
+      // than looking like a toggle that does nothing.
+      ...(needs ? { needs } : {}),
+    })),
   };
   const builderText = `${JSON.stringify(builder, null, 2)}\n`;
   writeFileSync(join(OUT, "builder.json"), builderText);

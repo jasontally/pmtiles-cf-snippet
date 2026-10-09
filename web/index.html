@@ -359,10 +359,40 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style, center: [2.
     error to tell you why.
   </p>
   <p>
-    Five sprite sheets, one per upstream flavour, at 1x and 2x. These styles draw no
-    icons, so nothing here is fetched unless you add an icon layer. If you want
-    townspots, highway shields or points of place, point <code>sprite</code> at the
-    one for your flavour.
+    Five sprite sheets, one per upstream flavour, at 1x and 2x. The styles below draw
+    icons from them, so these are fetched. If you want townspots, highway shields or
+    points of place in a style of your own, point <code>sprite</code> at the one for
+    your flavour. The icon names in a sheet are listed in its
+    <code>light.json</code>.
+  </p>
+  <h3>What the map draws, and where each thing comes from</h3>
+  <p>
+    Every layer is one of the nine source layers in this archive, so nothing here
+    needs a second archive. Two of them are worth calling out, because both look like
+    something missing when they are not:
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Layer</th><th>Comes from</th><th>In this build?</th></tr></thead>
+      <tbody>
+        <tr><td>Shapes, roads, buildings, water, land</td><td><code>earth</code>, <code>landcover</code>, <code>landuse</code>, <code>water</code>, <code>roads</code>, <code>buildings</code></td><td>yes</td></tr>
+        <tr><td>Place, road and water names</td><td>the <code>name</code> field on those same layers</td><td>yes</td></tr>
+        <tr><td>Point of place icons, townspots</td><td><code>pois.kind</code>, <code>places</code>, plus the sprite</td><td>yes</td></tr>
+        <tr><td>Route shields</td><td><code>roads.shield_text</code></td><td>no. The build being served does not have that field</td></tr>
+        <tr><td>House numbers</td><td><code>buildings.kind=address</code> and <code>buildings.addr_housenumber</code></td><td>no, same reason</td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p>
+    There is no separate address archive, and there is no address layer to fetch. The
+    upstream project puts address points <em>inside</em> the <code>buildings</code>
+    layer, as features with <code>kind=address</code> and an
+    <code>addr_housenumber</code>. That field arrived in a later Protomaps build than
+    the one this map is serving, so the house number layer is built and switches
+    itself on when the next weekly refresh brings them in. The same is true of the
+    shield text: the current build carries <code>shield_text_length</code>, which is
+    how many characters a route number is and not what they are, so a shield drawn
+    from it would be a blank shape on every motorway.
   </p>
   <p>
     If you have a style that points its glyphs at <code>demotiles.maplibre.org</code>,
@@ -879,12 +909,25 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       button.dataset.id = toggle.id;
       // The zoom a layer starts at, on the button. Buildings are not drawn
       // below z12, so without this the toggle looks broken at any normal zoom.
+      const marks = [];
       if (toggle.minzoom > 0) {
+        marks.push("z" + toggle.minzoom + "+");
+        button.title = toggle.label + " are drawn from zoom " + toggle.minzoom + " upwards";
+      }
+      if (toggle.needs) {
+        // A layer that is correct and silent reads as broken, so one that is
+        // waiting for the archive to carry a field says so.
+        marks.push("needs " + toggle.needs.split(".")[1]);
+        const which = toggle.needs.split(".")[0];
+        button.title = (button.title ? button.title + ". " : "") +
+          toggle.label + " are built and will draw when the tiles carry " + which +
+          "." + toggle.needs.split(".")[1] + ". They are not in the current build.";
+      }
+      if (marks.length) {
         button.append(toggle.label, Object.assign(document.createElement("span"), {
           className: "zmin",
-          textContent: "z" + toggle.minzoom + "+",
+          textContent: marks.join(" "),
         }));
-        button.title = toggle.label + " are drawn from zoom " + toggle.minzoom + " upwards";
       } else {
         button.textContent = toggle.label;
       }
@@ -898,12 +941,16 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
         // Turning a layer off below the zoom where it is drawn changes the style
         // and nothing on screen. Say why, because otherwise the control looks
         // broken and the visitor has no way to tell it apart from a real bug.
+        const why = [];
         if (!on && toggle.minzoom > 0 && map.getZoom() < toggle.minzoom) {
-          say(toggle.label + " start at zoom " + toggle.minzoom +
-            ". Zoom in to see them disappear.");
-        } else {
-          say("");
+          why.push(toggle.label + " start at zoom " + toggle.minzoom + ", so zoom in to see them disappear");
         }
+        if (!on && toggle.needs) {
+          const [which, field] = toggle.needs.split(".");
+          why.push(toggle.label + " need " + which + "." + field +
+            ", which this build of the tiles does not carry yet");
+        }
+        say(why.length ? why.join(". ") + "." : "");
       });
       $("builder-toggles").appendChild(button);
     }

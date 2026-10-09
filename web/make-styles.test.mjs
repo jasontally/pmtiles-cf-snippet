@@ -20,7 +20,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
-  buildStyle, renderTemplate, placeholderPalette, FLAVORS, SCHEMA, TILES_URL,
+  buildStyle, renderTemplate, renderProblems, placeholderPalette, FLAVORS, SCHEMA, TILES_URL,
   CONTROLS, CONTROL_KEYS, TOGGLE_GROUPS, packEdits, unpackEdits, hasUnfilled,
 } from "./make-styles.mjs";
 
@@ -69,9 +69,11 @@ await check("every flavour has the same palette keys", () => {
   for (const id of ids) {
     const keys = Object.keys(FLAVORS[id]).sort();
     assert.deepEqual(keys, reference, `flavour ${id} has a different set of palette keys`);
-    // label and swatch are for the page, the rest must be colours.
+    // name and swatch are for the page, sprite names the sprite sheet, the rest
+    // are colours. Both are the same kind of thing: a value the page fills in from
+    // the palette rather than one the visitor edits.
     for (const key of keys) {
-      if (key === "name" || key === "swatch") continue;
+      if (key === "name" || key === "swatch" || key === "sprite") continue;
       const value = FLAVORS[id][key];
       assert.equal(typeof value, "string", `${id}.${key} is ${typeof value}`);
       assert.match(value, /^#[0-9a-f]{6}$/i, `${id}.${key} is not a hex colour: ${value}`);
@@ -429,9 +431,12 @@ await check("every colour control reaches at least one layer", () => {
   // landcover and landuse are also toggle ids, which is why they are worth writing
   // down: {{landcover}} is a colour and {{show:landcover}} is a toggle, and the
   // renderer tells them apart by the prefix.
+  // `sprite` is the same idea as those two: it is a palette value the page fills in
+  // rather than a colour, so it is not an input, and it has to travel with the
+  // palette for template + palette == shipped style to hold for the sprite too.
   const DELIBERATELY_UNEXPOSED = new Set([
     "commercial", "industrial", "playground", "residential", "school", "scrub", "wetland",
-    "landcover", "landuse",
+    "landcover", "landuse", "sprite",
   ]);
   // name and flavor are not colours. The renderer fills them with "custom" and the
   // flavour label, so they are filled rather than left open.
@@ -503,7 +508,7 @@ await check("a toggle says which zoom it starts at, and that is true", () => {
   assert.equal(buildings.minzoom, 12, "buildings start at z12, so the number must say so");
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   assert.ok(page.includes('"z" + toggle.minzoom'), "the page does not show the zoom on the button");
-  assert.ok(page.includes("Zoom in to see them disappear"), "the page does not explain a no visible change");
+  assert.ok(page.includes("zoom in to see them disappear"), "the page does not explain a no visible change");
 });
 
 await check("the libraries are pinned to a version with an integrity hash", async () => {
@@ -544,6 +549,95 @@ await check("the page documents the fonts and the sprites it serves", () => {
   assert.ok(page.includes("Fonts, sprites and the libraries"), "the section is not titled for all three");
   assert.ok(/decide[sd]?\b|decision, not a/.test(page), "the page does not separate the decision from the measurement");
   assert.ok(page.includes("protomaps.github.io"), "the page does not offer the upstream alternative");
+});
+
+await check("a published style carries no placeholder", () => {
+  // It did. buildStyle writes {{show:toggle}} into the visibility of every layer a
+  // toggle covers, and the shipped files were written straight from that, so all
+  // three styles carried a literal {{show:roads}} in them. MapLibre fell back to the
+  // default, so nothing broke and nobody noticed, but a developer who copied one
+  // copied the placeholder into their own style.
+  for (const id of ["light", "bright", "dark"]) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const left = renderProblems(style);
+    assert.deepEqual(left, [], `${id}.json still has ${left.join(", ")}`);
+    for (const layer of style.layers) {
+      if (layer.visibility) {
+        assert.ok(["visible", "none"].includes(layer.visibility),
+          `${id}.json layer ${layer.id} has visibility ${layer.visibility}`);
+      }
+    }
+  }
+  // And it has a sprite, or the icons are silently absent.
+  for (const id of ["light", "bright", "dark"]) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    assert.ok(style.sprite, `${id}.json has no sprite, so no icon will draw`);
+    assert.ok(/^https:\/\/tiles\.jasontally\.com\/sprites\/v4\//.test(style.sprite),
+      `${id}.json points its sprite at ${style.sprite}`);
+  }
+});
+
+await check("the roads filter on kind, not on kind_detail", () => {
+  // This is the bug that had the public map drawing no roads at all. The class names
+  // in the upstream documentation — motorway, trunk, primary, residential — are
+  // kind_detail values. roads.kind is the coarse class: highway, major_road,
+  // minor_road, path, rail. Filtering kind against the detail names matched nothing,
+  // and every layer still loaded and every request still succeeded.
+  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "bright.json"), "utf8"));
+  const roadLayers = style.layers.filter((l) => l["source-layer"] === "roads");
+  const coarse = new Set(["highway", "major_road", "minor_road", "path", "rail"]);
+  const detailOnly = new Set([
+    "motorway", "trunk", "primary", "secondary", "tertiary", "residential", "unclassified",
+    "living_street", "service", "road", "footway", "cycleway", "steps", "pedestrian",
+    "light_rail", "subway", "tram", "narrow_gauge",
+  ]);
+  const bad = [];
+  const used = [];
+  const walk = (node) => {
+    if (!Array.isArray(node)) return;
+    if (node[0] === "get" && node[1] === "kind" && Array.isArray(node[1]) === false) {
+      used.push(node[1]);
+    }
+    // ["match", ["get", field], kinds...]
+    if (node[0] === "match" && Array.isArray(node[1]) && node[1][0] === "get") {
+      const field = node[1][1];
+      if (field === "kind") {
+        for (const label of node.slice(2, -1)) {
+          if (Array.isArray(label)) for (const kind of label) if (detailOnly.has(kind)) bad.push(kind);
+        }
+      }
+    }
+    node.forEach(walk);
+  };
+  for (const layer of roadLayers) walk(layer.filter);
+  assert.deepEqual(bad, [], `a roads filter matches a kind_detail value against kind: ${[...new Set(bad)].join(", ")}`);
+  // And the classes actually used are all coarse ones.
+  const kinds = new Set(used.filter((k) => k === "kind"));
+  assert.ok(kinds.size > 0, "no roads layer filters on kind at all");
+  for (const layer of roadLayers) {
+    const json = JSON.stringify(layer.filter);
+    for (const detail of detailOnly) {
+      assert.ok(!json.includes(`"${detail}"`), `${layer.id} still mentions ${detail}`);
+    }
+  }
+});
+
+await check("a layer waiting on a field names it, and the page says so", () => {
+  // A toggle that is correct and silent reads as broken. These two draw nothing until
+  // the archive carries a field, so they have to say so rather than look dead.
+  const builder = readBuilder();
+  for (const toggle of builder.toggles) {
+    if (!toggle.needs) continue;
+    assert.ok(/^[a-z]+\.[a-z_]+$/.test(toggle.needs), `${toggle.id} needs is not a layer.field: ${toggle.needs}`);
+    const [layer, field] = toggle.needs.split(".");
+    // The archive's own field list, over HTTP, is the only honest source for this.
+    // Offline, the check is that the field is named and the page renders it.
+  }
+  const page = readFileSync(join(HERE, "index.html"), "utf8");
+  assert.ok(page.includes("needs "), "the page does not show which layer needs what");
+  assert.ok(page.includes("addr_housenumber"), "the page does not name the missing house number field");
+  assert.ok(page.includes("shield_text"), "the page does not name the missing shield text field");
+  assert.ok(page.includes("inside"), "the page does not say the address points are inside buildings");
 });
 
 console.log(`${passed} passed, ${failed} failed`);
