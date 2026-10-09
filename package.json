@@ -29,6 +29,8 @@
     "test:shard-build": "node shard-repo/shard-build.test.mjs",
     "assets": "node tools/fetch-assets.mjs",
     "assets:check": "node tools/fetch-assets.mjs --check",
-    "bench:assets": "node tools/bench-assets.mjs"
+    "bench:assets": "node tools/bench-assets.mjs",
+    "check:fields": "node tools/check-fields.mjs",
+    "check:style": "node tools/check-style.mjs"
   }
 }

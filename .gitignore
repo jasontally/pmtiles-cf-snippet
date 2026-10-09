@@ -19,3 +19,8 @@ __pycache__/
 
 # Browser test artefacts from the MCP playwright server.
 .playwright-mcp/
+
+# A dev-only copy of the PMTiles ESM build, so tools/check-fields.mjs can import
+# it. The published copy at /vendor is the UMD build, which does not import in
+# Node. Same package, same version, and it is not served anywhere.
+tools/.pmtiles-cdn.mjs

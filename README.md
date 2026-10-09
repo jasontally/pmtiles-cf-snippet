@@ -46,6 +46,8 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `deploy-test.js` | Checks the deploy requests against a mock API. |
 | `tools/sync-reader.mjs` | Brings the reader's byte offsets in line with the live archive. |
 | `tools/fetch-assets.mjs` | Vendors the fonts and the sprites, and checks them by digest. |
+| `tools/check-fields.mjs` | Reads real tiles and reports which fields the archive carries. |
+| `tools/check-style.mjs` | Loads each published style in a browser and asserts each layer draws. |
 | `tools/bench-assets.mjs` | Measures this host against jsDelivr and the upstream assets site. |
 | `asset-hosting.md` | Where the fonts, sprites and libraries are served from, and why. |
 | `shard-repo/` | The template pushed to each of the 13 shard repos. |
@@ -209,6 +211,11 @@ the split and deploys the snippet only.
 * No GitHub repo holds a Cloudflare token. Each shard repo has a workflow that
   commits the archive it should hold, and that commit starts the build. Cloudflare
   injects its own token into the build. See [refresh.md](refresh.md).
+* Two layers wait on data the archive does not carry. `tools/check-fields.mjs`
+  reads real tiles and reports which fields are there. `shield_text` and
+  `addr_housenumber` are both absent from the tiles and from the metadata, so the
+  shield and house number layers draw nothing until a refresh brings them in. See
+  the Fonts and sprites section of the documentation page.
 * The fonts, the sprite sheets and copies of the two libraries are published here,
   so a map can come from one hostname. The page loads the libraries from jsDelivr
   because that measured faster. See [asset-hosting.md](asset-hosting.md).
