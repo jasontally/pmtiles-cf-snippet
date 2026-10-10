@@ -891,5 +891,66 @@ await check("the examples cover the layers, the colours, and where the copy goes
   assert.ok(page.includes("rebuilt weekly"), "the page does not say the copy is rebuilt weekly");
 });
 
+await check("every label and halo clears the WCAG AA text bar", async () => {
+  // SC 1.4.3 Contrast (Minimum), Level AA: 4.5:1 for text against its background.
+  // This is the one contrast bar that is enforced for a map, because a label that
+  // is dim is unreadable and there is no version of a good dark map with one.
+  //
+  // The previous dark palette passed this and failed almost every shape bar, which
+  // is why the dark redraw was worth doing: the thing a dark map must fix is the
+  // line work and the fills, and the way to do that without breaking the labels is
+  // to spend the contrast budget on the thin things and leave the wide fills dark.
+  const { contrast } = await import("../tools/contrast.mjs");
+  const TEXT_BAR = 4.5;
+  const backdrop = (v) => (Array.isArray(v) ? v[v.length - 1] : v);
+
+  for (const id of ["light", "bright", "dark"]) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const bg = backdrop(style.layers.find((l) => l.id === "background").paint["background-color"]);
+    for (const layer of style.layers) {
+      if (layer.type !== "symbol") continue;
+      const text = layer.paint && layer.paint["text-color"];
+      if (!text) continue;
+      for (const back of [bg, layer.paint["text-halo-color"]]) {
+        if (typeof back !== "string") continue;
+        const ratio = contrast(text, back);
+        assert.ok(
+          ratio >= TEXT_BAR,
+          `${id}.json layer ${layer.id} text ${text} on ${back} is ${ratio.toFixed(2)}, needs ${TEXT_BAR}`
+        );
+      }
+    }
+  }
+});
+
+await check("the dark palette spends its contrast on the thin things", async () => {
+  // The brief this redraw answered: keep water near black for OLED, and give the
+  // thin things the contrast they need. So check that shape, not just that the
+  // colours exist. Water is dark, and the edges and roads are the brightest things
+  // in the palette.
+  const { contrast, luminance } = await import("../tools/contrast.mjs");
+  const dark = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "dark.json"), "utf8"));
+  const layer = (id) => dark.layers.find((l) => l.id === id);
+  const palette = (await import("../web/make-styles.mjs")).FLAVORS.dark;
+
+  // Water as close to black as an OLED pixel allows.
+  assert.equal(palette.water, "#000000", "the dark water is not black, so the OLED saving is lost");
+  // The land only just off it, so the wide fills stay cheap.
+  assert.ok(luminance(palette.earth) < 0.01, `the dark land is too bright: ${palette.earth}`);
+  // The edges and the lines are what carry the map, and they are bright.
+  for (const key of ["waterLine", "landEdge", "road", "roadMajor", "boundary"]) {
+    assert.ok(
+      contrast(palette[key], "#000000") >= 3,
+      `the dark ${key} is ${palette[key]}, which is too dim to carry a line at 3:1`
+    );
+  }
+  // And the edge keys are actually drawn, not just present in the palette. A colour
+  // the style never reads is a control that changes nothing.
+  assert.equal(layer("water-line").paint["line-color"], palette.waterLine,
+    "the water edge is not the one the palette says it is");
+  assert.ok(layer("earth").paint["fill-outline-color"],
+    "the land has no edge outline, so land and water merge");
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);

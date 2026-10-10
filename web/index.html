@@ -255,7 +255,7 @@
         <span class="maphint" id="maphint"></span>
         <div class="zoomer" id="zoomer">
           <button type="button" id="zoom-out" aria-label="Zoom out">&minus;</button>
-          <span id="zoom-readout" title="Zoom level. The archive holds z0 to z15.">z0</span>
+          <span id="zoom-readout" title="Zoom level. The archive holds z0 to z15, and the map overzooms past that.">z0</span>
           <button type="button" id="zoom-in" aria-label="Zoom in">+</button>
         </div>
       </div>
@@ -752,7 +752,17 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   // tells you which layers have any chance of drawing. `move` fires whenever the
   // view changes, including from any of the input methods not routed through these
   // two buttons, so this stays right without knowing which one moved it.
-  const MAX_ZOOM = 15;
+  // Three past the archive's z15, which is overzoom and is safe for vector tiles.
+  // MapLibre re-renders the deepest tiles it has rather than fetching a z16 part
+  // that does not exist, so nothing 404s and the geometry stays crisp. It is worth
+  // the three levels because a visitor who zooms in to read a street name should
+  // not hit a wall at z15.
+  //
+  // Do not raise this to the archive's 15 by copy and paste: the shape is the same,
+  // but the meaning is different, and the measurement below is what the number is
+  // for. Measured by watching the requests: at z16, z17 and z18 the map asked for
+  // fewer parts than at z15, all of them 200, and none of them for a z16 tile.
+  const MAX_ZOOM = 18;
   const MIN_ZOOM = 0;
 
   function paintZoom() {

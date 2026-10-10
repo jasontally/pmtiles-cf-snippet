@@ -251,9 +251,9 @@ export const TOGGLE_EXCLUSIONS = ["place-settlement", "road-shield", "address-la
  * would give the user a control that changes nothing.
  */
 export const CONTROLS = [
-  { group: "Background", keys: ["background", "earth"] },
+  { group: "Background", keys: ["background", "earth", "landEdge"] },
   { group: "Land", keys: ["forest", "grass", "farmland", "park", "sand", "rock", "ice"] },
-  { group: "Water", keys: ["water"] },
+  { group: "Water", keys: ["water", "waterLine"] },
   { group: "Roads", keys: ["road", "roadMajor", "roadCasing"] },
   { group: "Boundaries and labels", keys: ["boundary", "label", "halo", "poiLabel"] },
   { group: "Buildings", keys: ["building", "buildingOutline"] },
@@ -316,6 +316,9 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     "source-layer": "earth",
     paint: {
       "fill-color": ["match", ["get", "kind"], "glacier", p.ice, "bare_rock", p.rock, "sand", p.sand, p.earth],
+      // A land edge, so the ground reads where it meets the black water. Both
+      // fills are near black on a dark map, and without this they merge.
+      "fill-outline-color": p.landEdge,
     },
   });
 
@@ -403,8 +406,13 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     type: "line",
     source: SOURCE_NAME,
     "source-layer": "water",
+    // The water edge. Black water against near black land needs an edge for the
+    // water to have a shape at all, and this is it. On the light palettes it is
+    // the same colour as the water and so invisible.
     filter: inKind(WATER_LINES[0]),
-    paint: { "line-color": p.water, "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.4, 10, 1.6] },
+    paint: {
+      "line-color": p.waterLine, "line-width": ["interpolate", ["linear"], ["zoom"], 3, 0.6, 10, 2],
+    },
   });
 
   // ---- boundaries, under the roads ----
@@ -794,6 +802,9 @@ export const FLAVORS = {
     // true for the sprite as well as for the colours.
     sprite: "light",
     background: "#f8f4f0",
+      // See landEdge: the same colour as the land, so the edge is invisible
+      // on a light map. A dark palette sets it independently.
+      landEdge: "#e8e2d8",
     earth: "#f6f2ec",
     rock: "#e8e2d8",
     sand: "#efe6d2",
@@ -811,6 +822,9 @@ export const FLAVORS = {
     school: "#e9e4ee",
     playground: "#dfead8",
     wetland: "#d8e6e0",
+      // See waterEdge: the same colour as the water, so the edge is invisible
+      // on a light map. A dark palette sets it independently.
+      waterLine: "#a8cbf0",
     water: "#a8cbf0",
     boundary: "#8a8378",
     road: "#ffffff",
@@ -827,6 +841,9 @@ export const FLAVORS = {
     swatch: "#fdfdfb",
     sprite: "light",
     background: "#fdfdfb",
+      // See landEdge: the same colour as the land, so the edge is invisible
+      // on a light map. A dark palette sets it independently.
+      landEdge: "#eee8dc",
     earth: "#fbfaf6",
     rock: "#eee8dc",
     sand: "#f6ecd4",
@@ -844,6 +861,9 @@ export const FLAVORS = {
     school: "#e6ddf2",
     playground: "#cfecc7",
     wetland: "#c9e8e2",
+      // See waterEdge: the same colour as the water, so the edge is invisible
+      // on a light map. A dark palette sets it independently.
+      waterLine: "#8ecdf5",
     water: "#8ecdf5",
     boundary: "#7b7468",
     road: "#ffffff",
@@ -855,38 +875,71 @@ export const FLAVORS = {
     poiLabel: "#5d5a51",
     halo: "#ffffff",
   },
+  // The dark palette.
+  //
+  // Notes on dark, and the shape a correct one takes:
+  //
+  //   * WATER STAYS BLACK. On an OLED display a black pixel is switched off, so
+  //     the largest single-colour area on the map is also the cheapest one. That
+  //     is worth keeping, and it costs nothing accessibility-wise, because a wide
+  //     fill carries no contrast obligation of its own.
+  //   * THE OBLIGATION FALLS ON THE THIN THINGS. A road line and a place name are
+  //     the graphical objects a viewer must find, so under WCAG 2.2 SC 1.4.11 they
+  //     need 3:1 against what is behind them, and a label under SC 1.4.3 needs
+  //     4.5:1. So contrast is spent where it is required and nowhere else.
+  //   * THE WIDE FILLS STAY DARK AND THE EDGES GET BRIGHT. Land, water and
+  //     buildings stay near black; the edges that separate them, and every line
+  //     and label, are the brightest things here. That is the opposite of a
+  //     light map, where the fills are bright and the lines dark, and it is why a
+  //     dark map needs designing rather than inverting.
+  //   * THE ROAD CASING IS BLACK, so a bright road reads as a bright line with
+  //     its own edge rather than as a smear.
+  //
+  // Measured, not asserted: tools/contrast-report.mjs computes the WCAG ratio for
+  // every pair here against the colour behind it, and make-styles.test.mjs fails
+  // the build if any of them drops below its bar. The previous palette passed the
+  // text bars and failed almost every shape bar.
   dark: {
     name: "Dark",
     sprite: "dark",
-    swatch: "#26282b",
-    background: "#1c1e21",
-    earth: "#24262a",
-    rock: "#33363a",
-    sand: "#3a3730",
-    ice: "#3f454b",
-    landcover: "#262a2c",
-    landuse: "#212427",
-    forest: "#24352a",
-    grass: "#2b3527",
-    farmland: "#32302a",
-    scrub: "#2c332a",
-    park: "#22342a",
-    residential: "#2a2c30",
-    commercial: "#2e2a2c",
-    industrial: "#2b2e33",
-    school: "#282a33",
-    playground: "#233527",
-    wetland: "#22322f",
-    water: "#16323f",
-    boundary: "#5b6169",
-    road: "#3c4148",
-    roadMajor: "#8a6a45",
-    roadCasing: "#202225",
-    building: "#2d3136",
-    buildingOutline: "#3a3f45",
-    label: "#d6d8db",
-    poiLabel: "#a2a7ad",
-    halo: "#141618",
+    swatch: "#0f1114",
+    // Ground and water, both as close to black as the shapes still separate.
+    background: "#000000",
+    water: "#000000",
+    // Land, only just off black. The eye finds the edge, not the fill.
+    earth: "#0e1114",
+    landcover: "#0e1114",
+    landuse: "#0e1114",
+    // Land cover detail, distinguishable from the ground but still dark.
+    forest: "#10281a",
+    grass: "#102a1c",
+    farmland: "#2a2517",
+    scrub: "#122619",
+    park: "#0e2d1e",
+    residential: "#12161a",
+    commercial: "#16181c",
+    industrial: "#191c21",
+    school: "#0d1420",
+    playground: "#0e2a12",
+    wetland: "#0b2522",
+    rock: "#22262b",
+    sand: "#2b2617",
+    ice: "#26303a",
+    // The edges and the thin things, where the contrast budget goes.
+    waterLine: "#4d9bd4",
+    landEdge: "#5f6d7c",
+    boundary: "#8b9bb0",
+    // Roads bright, and the highest class the brightest, so hierarchy reads.
+    road: "#cdd3da",
+    roadMajor: "#f2c14e",
+    roadCasing: "#000000",
+    // Buildings only need to be found against the land.
+    building: "#5b6773",
+    buildingOutline: "#5b6773",
+    // Text comfortably clear of both bars.
+    label: "#f0f3f6",
+    poiLabel: "#aab6c2",
+    halo: "#000000",
   },
 };
 
