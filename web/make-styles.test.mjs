@@ -770,7 +770,7 @@ await check("the roads filter on kind, not on kind_detail", () => {
   }
 });
 
-await check("a boundary is heavier than every road at every zoom", () => {
+await check("a boundary is heavier than every road at every zoom, in every style", () => {
   // The rule this map is built to, stated so it cannot drift again. Roads used to
   // grow to 7px at z15 while the country border tapered to 1.15px, so at every
   // zoom above z6 the roads outweighed the borders and nothing complained: a line
@@ -780,9 +780,13 @@ await check("a boundary is heavier than every road at every zoom", () => {
   // A boundary divides the ground for its own sake; a road is drawn on the ground
   // and is one of many. The line that answers "which side of this am I on" should
   // be the heavier one.
-  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "dark.json"), "utf8"));
-  const layer = (id) => style.layers.find((l) => l.id === id);
-
+  //
+  // All three flavours, because the widths come from one template but the
+  // palettes do not, and a rule enforced on one style is a rule that can be
+  // broken in the other two by a palette change alone. It happens to pass in all
+  // three today by the same numbers; saying so is cheap, and finding out the hard
+  // way that it drifted in only the bright map is not.
+  //
   // Evaluate ["interpolate", ["linear"], ["zoom"], z0, v0, z1, v1, ...] at a zoom,
   // stopping at the last stop instead of past it, which is what the spec does.
   const atZoom = (expr, z) => {
@@ -797,22 +801,30 @@ await check("a boundary is heavier than every road at every zoom", () => {
     return stops[stops.length - 1];
   };
 
+  const ROAD_IDS = ["road-highway", "road-major", "road-minor", "road-path", "road-rail"];
+  const BOUNDARY_IDS = ["boundary-region", "boundary-country"];
   const MAX_ZOOM = 15;
-  const roads = ["road-highway", "road-major", "road-minor", "road-path", "road-rail"]
-    .map((id) => ({ id, w: layer(id).paint["line-width"] }));
+  let compared = 0;
 
-  for (const id of ["boundary-region", "boundary-country"]) {
-    const width = layer(id).paint["line-width"];
-    for (let z = 0; z <= MAX_ZOOM; z++) {
-      const border = atZoom(width, z);
-      for (const road of roads) {
-        const roadAt = atZoom(road.w, z);
-        if (roadAt <= 0) continue;
-        assert.ok(border >= roadAt,
-          `${id} is ${border.toFixed(2)}px at z${z} and ${road.id} is ${roadAt.toFixed(2)}px: a road outweighs a boundary`);
+  for (const flavor of Object.keys(FLAVORS)) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${flavor}.json`), "utf8"));
+    const layer = (id) => style.layers.find((l) => l.id === id);
+    const roads = ROAD_IDS.map((id) => ({ id, w: layer(id).paint["line-width"] }));
+    for (const id of BOUNDARY_IDS) {
+      const width = layer(id).paint["line-width"];
+      for (let z = 0; z <= MAX_ZOOM; z++) {
+        const border = atZoom(width, z);
+        for (const road of roads) {
+          const roadAt = atZoom(road.w, z);
+          if (roadAt <= 0) continue;
+          compared++;
+          assert.ok(border >= roadAt,
+            `${flavor}: ${id} is ${border.toFixed(2)}px at z${z} and ${road.id} is ${roadAt.toFixed(2)}px: a road outweighs a boundary`);
+        }
       }
     }
   }
+  assert.ok(compared > 0, "no width pairs compared, so the rule was never checked");
 });
 
 await check("a layer waiting on a field names it, and the page says so", () => {
