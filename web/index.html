@@ -56,17 +56,27 @@
   code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
   a { color: var(--accent); }
 
-  header.hero { padding: 3rem 0 1.5rem; }
+  /* The hero is deliberately short. The map is the point, and every line pushed
+     above it is a line a reader scrolls past. */
+  header.hero { padding: 1.75rem 0 1.25rem; }
   h1 { font-size: clamp(1.9rem, 5vw, 2.6rem); line-height: 1.15; margin: 0 0 .5rem; letter-spacing: -.02em; }
-  .lede { font-size: 1.1rem; color: var(--muted); max-width: 46rem; margin: 0 0 1.5rem; }
+  .lede { font-size: 1.1rem; color: var(--muted); max-width: 46rem; margin: 0 0 1rem; }
   .url {
     display: block; background: var(--code-bg); border: 1px solid var(--line);
     border-radius: 8px; padding: .8rem 1rem; overflow-x: auto; white-space: nowrap;
   }
-  .facts { display: grid; gap: .75rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 1.5rem 0 0; padding: 0; list-style: none; }
-  .facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: .85rem 1rem; }
-  .facts b { display: block; font-size: 1.05rem; margin-bottom: .1rem; }
-  .facts span { color: var(--muted); font-size: .9rem; }
+  /* Two facts, tight and side by side, so the map sits high on the page. Both of
+     them are things a reader cannot see from looking at the map itself. Two other
+     cards were removed: the fastest-with-use line and the zoom range, which the
+     map's own zoom control now shows. */
+  .facts { display: grid; gap: .5rem; grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr)); margin: 1rem 0 0; padding: 0; list-style: none; }
+  /* Three facts in a row, kept short so the map is visible without scrolling.
+     Two were removed: the fastest-with-use line and the zoom range, which the
+     map itself shows. What remains is the two things a reader cannot see from
+     looking at the map, plus the archive's range. */
+  .facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .8rem; }
+  .facts b { display: inline; font-size: .95rem; margin-right: .4rem; }
+  .facts span { color: var(--muted); font-size: .82rem; }
 
   section { margin-top: 3.5rem; }
   h2 { font-size: 1.4rem; margin: 0 0 .35rem; letter-spacing: -.01em; }
@@ -213,8 +223,6 @@
   <ul class="facts">
     <li><b>No API key</b><span>Nothing to sign up for, no token in your code.</span></li>
     <li><b>No rate limit</b><span>No throttling, no quota, no burst cap.</span></li>
-    <li><b>Faster with use</b><span>Tile parts are cached at the edge, so a place that gets looked at often gets quicker.</span></li>
-    <li><b>Zoom 0 to 15</b><span>Vector tiles, gzip, 118&nbsp;GiB of archive.</span></li>
   </ul>
 </header>
 

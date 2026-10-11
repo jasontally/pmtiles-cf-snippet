@@ -409,15 +409,21 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     // A shoreline. The land's own fill outline cannot do this job: earth is drawn
     // first, the water fill is drawn over it, and so that outline is buried
     // wherever water covers land. Drawing the land a second time, after the
-    // water, with its fill transparent, leaves only the outline, and that outline
-    // is now on top.
+    // water, leaves only the outline, and that outline is now on top.
     //
     // This is what makes an ocean meet the land on a dark map, where both are
     // near black and neither has an edge of its own. Without it the water is a
     // shape with no boundary and the coast does not exist at all.
+    //
+    // The fill is drawn at full opacity, in the ground's own colour, so it is
+    // invisible because it matches the ground it covers rather than because it is
+    // clear. fill-opacity: 0 swallows the outline with it, which is how this layer
+    // shipped invisible: screenshots taken with and without it were byte-identical.
+    // Found by that screenshot comparison, not by a feature count, because
+    // queryRenderedFeatures reports features in a layer whether or not they drew.
     paint: {
       "fill-color": p.earth,
-      "fill-opacity": 0,
+      "fill-opacity": 1,
       "fill-outline-color": p.shore,
     },
   });
@@ -450,7 +456,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // should separate at every zoom, not only the closest ones. The dash is
       // dropped because a dash on a dark ground reads as a broken line rather than
       // as a boundary.
-      "line-width": 1,
+      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 1.6, 6, 1],
       "line-opacity": 1,
     },
   });
@@ -461,12 +467,14 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     source: SOURCE_NAME,
     "source-layer": "boundaries",
     filter: inKind(["country"]),
-    // The boldest hairline on the map. It was a 0.6px slash, which is why a
-    // country border read no stronger than a district road. Solid and at full
-    // strength, so it is the line that separates countries.
     paint: {
       "line-color": p.boundary,
-      "line-width": 1,
+      // Widest at low zoom and settling as the map fills with detail. Below z3
+      // almost nothing else is drawn, so a country border there was the only line
+      // on the map and yet it was drawn at the same weight as a district road and
+      // dimmer than every road colour. At z0 a country border should be the
+      // boldest thing on screen, because there is nothing else competing with it.
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 2.6, 6, 1.2],
       "line-opacity": 1,
     },
   });
@@ -973,7 +981,12 @@ export const FLAVORS = {
     // eye traces first: it is where the largest single area on the map ends.
     // Black water against near black land has no boundary without it.
     shore: "#8fd0f2",
-    boundary: "#8b9bb0",
+    // A border is the only line on the map that is drawn for its own sake: it is
+    // not a thing on the ground, it is where two things on the ground stop. So it
+    // should never be the quietest line, and on a dark map it has to be bright
+    // enough to compete with a road. 10.12:1 against black, against the roads at
+    // 11.74 and 12.47, so it reads alongside them instead of under them.
+    boundary: "#a3b6cc",
     // Roads bright, and the highest class the brightest, so hierarchy reads.
     // A step down from the first draft, which was drawn brighter than the
     // shorelines and the boundaries and so shouted over them. A road that reads
