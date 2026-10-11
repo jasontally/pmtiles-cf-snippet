@@ -162,12 +162,28 @@ export const SCHEMA = {
  * looked like a map. The only way to see it is to ask the map what it drew, which
  * is what tools/check-style.mjs does and what every offline check failed to.
  */
+/**
+ * [id, the `kind` value, first zoom, width at first zoom] per road class.
+ *
+ * Widths are set against the borders and the shoreline, not against each other. A
+ * road was the heaviest line on the map at every zoom and the two lines that
+ * divide the ground were the thinnest, which is backwards: at z0 a country border
+ * is the only line drawn and it should be the boldest thing on screen, while a
+ * motorway at z3 is one of a handful and should sit under it.
+ *
+ * So: roads thin, borders thick, and they meet in the middle at z6 where the map
+ * has detail everywhere and neither should dominate. This is a dark-map balance
+ * question, not an accessibility one: both already clear 3:1 by colour.
+ *
+ * `roads.kind` is the coarse class and it is one of five values: highway,
+ * major_road, minor_road, path, rail.
+ */
 const ROADS = [
-  ["road-highway", ["highway"], 3, 2.2],
-  ["road-major", ["major_road"], 4, 1.7],
-  ["road-minor", ["minor_road"], 7, 0.8],
-  ["road-path", ["path"], 12, 0.35],
-  ["road-rail", ["rail"], 11, 0.5],
+  ["road-highway", ["highway"], 3, 1.4],
+  ["road-major", ["major_road"], 4, 1.15],
+  ["road-minor", ["minor_road"], 7, 0.62],
+  ["road-path", ["path"], 12, 0.3],
+  ["road-rail", ["rail"], 11, 0.42],
 ];
 
 /**
@@ -456,7 +472,9 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // should separate at every zoom, not only the closest ones. The dash is
       // dropped because a dash on a dark ground reads as a broken line rather than
       // as a boundary.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 1.6, 6, 1],
+      // Settles to the road width at z6, as the country border does, so the two
+      // dividing lines read as one weight once detail arrives.
+      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 6, 1],
       "line-opacity": 1,
     },
   });
@@ -474,7 +492,8 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // on the map and yet it was drawn at the same weight as a district road and
       // dimmer than every road colour. At z0 a country border should be the
       // boldest thing on screen, because there is nothing else competing with it.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 2.6, 6, 1.2],
+      // It settles to the roads' width at z6, where detail is everywhere.
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 3.4, 6, 1.15],
       "line-opacity": 1,
     },
   });
