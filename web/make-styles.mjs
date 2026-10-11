@@ -146,7 +146,18 @@ export const SCHEMA = {
 };
 
 /**
- * [id, the `kind` value, first zoom, line width] for each road class.
+ * The deepest zoom any source layer in this archive carries, from SCHEMA.
+ *
+ * Line widths in this style stop here and go no further. Past z15 the reader
+ * serves the deepest tile it has and the map over-zooms it, so an interpolation
+ * that ran on to z18 would stretch a road or a border with drawn detail that the
+ * tile does not actually have. Stopping at z15 keeps a z18 screen looking like
+ * z15 lines on a bigger canvas, which is what over-zoom is.
+ */
+const MAX_ZOOM_REF = 15;
+
+/**
+ * [id, the `kind` value, first zoom, width at first zoom, width at z15] per road class.
  *
  * `kind`, not `kind_detail`. This was wrong for most of this project's life. The
  * fine-grained class names from the upstream documentation — motorway, trunk,
@@ -158,32 +169,23 @@ export const SCHEMA = {
  * `roads.kind` is the coarse class and it is one of five values: highway,
  * major_road, minor_road, path, rail.
  *
- * Nothing caught this. Every layer loaded, every request succeeded, and the map
- * looked like a map. The only way to see it is to ask the map what it drew, which
- * is what tools/check-style.mjs does and what every offline check failed to.
- */
-/**
- * [id, the `kind` value, first zoom, width at first zoom] per road class.
+ * Widths are set against the borders, not against each other. The rule for this
+ * map is that a boundary is heavier than a road at every zoom, because a boundary
+ * is a line that divides the ground for its own sake and a road is a line drawn on
+ * the ground. Above z6 both borders hold a flat width, and every road class stays
+ * under it, so the reading order is: boundary, road, everything else.
  *
- * Widths are set against the borders and the shoreline, not against each other. A
- * road was the heaviest line on the map at every zoom and the two lines that
- * divide the ground were the thinnest, which is backwards: at z0 a country border
- * is the only line drawn and it should be the boldest thing on screen, while a
- * motorway at z3 is one of a handful and should sit under it.
- *
- * So: roads thin, borders thick, and they meet in the middle at z6 where the map
- * has detail everywhere and neither should dominate. This is a dark-map balance
- * question, not an accessibility one: both already clear 3:1 by colour.
- *
- * `roads.kind` is the coarse class and it is one of five values: highway,
- * major_road, minor_road, path, rail.
+ * Nothing caught the original filter mistake here. Every layer loaded, every
+ * request succeeded, and the map looked like a map. The only way to see it is to
+ * ask the map what it drew, which is what tools/check-style.mjs does and what
+ * every offline check failed to.
  */
 const ROADS = [
-  ["road-highway", ["highway"], 3, 1.4],
-  ["road-major", ["major_road"], 4, 1.15],
-  ["road-minor", ["minor_road"], 7, 0.62],
-  ["road-path", ["path"], 12, 0.3],
-  ["road-rail", ["rail"], 11, 0.42],
+  ["road-highway", ["highway"], 3, 1.2, 2.2],
+  ["road-major", ["major_road"], 4, 1.0, 1.9],
+  ["road-minor", ["minor_road"], 7, 0.55, 1.35],
+  ["road-path", ["path"], 12, 0.28, 0.7],
+  ["road-rail", ["rail"], 11, 0.4, 1.05],
 ];
 
 /**
@@ -459,6 +461,21 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   });
 
   // ---- boundaries, under the roads ----
+  //
+  // A boundary is heavier than a road at every zoom. That is the rule, and it is
+  // the opposite of what this style used to do: the roads grew to 7px at z15 while
+  // the country border tapered to 1.15px, so at every zoom above z6 the roads won.
+  //
+  // The reason is what each line is for. A boundary divides the ground and needs
+  // no other reason to be drawn; a road is drawn on top of the ground and is one
+  // of many. A map where the roads outweigh the borders reads as a road map with
+  // lines through it, and the questions a low zoom answers — which country, which
+  // side of it — are the ones the heaviest line should serve.
+  //
+  // Both borders therefore hold a flat width above z6, where the map has detail
+  // everywhere, and every road class stops below them. The margins at z15 are
+  // 0.7px over the top road class for the country border and 0.4px for the
+  // region, which is enough to read as heavier without either looking like a wall.
   layers.push({
     id: "boundary-region",
     type: "line",
@@ -472,9 +489,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // should separate at every zoom, not only the closest ones. The dash is
       // dropped because a dash on a dark ground reads as a broken line rather than
       // as a boundary.
-      // Settles to the road width at z6, as the country border does, so the two
-      // dividing lines read as one weight once detail arrives.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2.2, 6, 1],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2.4, 6, 2.6],
       "line-opacity": 1,
     },
   });
@@ -487,19 +502,29 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     filter: inKind(["country"]),
     paint: {
       "line-color": p.boundary,
-      // Widest at low zoom and settling as the map fills with detail. Below z3
-      // almost nothing else is drawn, so a country border there was the only line
-      // on the map and yet it was drawn at the same weight as a district road and
-      // dimmer than every road colour. At z0 a country border should be the
-      // boldest thing on screen, because there is nothing else competing with it.
-      // It settles to the roads' width at z6, where detail is everywhere.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 3.4, 6, 1.15],
+      // Widest at low zoom, where almost nothing else is drawn and a country
+      // border is the only line on screen. At z0 it was 2.6px and was drawn the
+      // same weight as a district road while being dimmer than every road colour,
+      // so the roads still won. It widens to 3.4 and settles at 2.9.
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 3.4, 6, 2.9],
       "line-opacity": 1,
     },
   });
 
   // ---- roads: every class gets a casing and a fill, casings first ----
-  for (const [id, kinds, minzoom, width] of ROADS) {
+  //
+  // A road is one layer for its casing and one for its colour, both the same
+  // width. The casing is what lets a light road cross a dark area and a dark
+  // road cross a light area, and it is why a road can look heavier than its own
+  // width: the eye reads the pair of edges, not the line.
+  //
+  // The width grows from its first zoom to z15, never past it. `width` was once
+  // multiplied by a flat 3.2 at z15, which put the top road class at 7px and
+  // made every border on the map thinner than every road. The growth is now
+  // stated per class, and each one stops below the borders.
+  for (const [id, kinds, minzoom, width, widthAtMax] of ROADS) {
+    const zoomToWidth = ["interpolate", ["linear"], ["zoom"],
+      minzoom, width, MAX_ZOOM_REF, widthAtMax];
     layers.push({
       id: `${id}-casing`,
       type: "line",
@@ -510,7 +535,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": p.roadCasing,
-        "line-width": ["interpolate", ["linear"], ["zoom"], minzoom, width, 15, width * 3.2],
+        "line-width": zoomToWidth,
       },
     });
     layers.push({
@@ -523,7 +548,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       layout: { "line-cap": "round", "line-join": "round" },
       paint: {
         "line-color": ["case", ["in", ["get", "kind"], ["literal", ["motorway", "trunk"]]], p.roadMajor, p.road],
-        "line-width": ["interpolate", ["linear"], ["zoom"], minzoom, width, 15, width * 3.2],
+        "line-width": zoomToWidth,
       },
     });
   }

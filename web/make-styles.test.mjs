@@ -770,6 +770,51 @@ await check("the roads filter on kind, not on kind_detail", () => {
   }
 });
 
+await check("a boundary is heavier than every road at every zoom", () => {
+  // The rule this map is built to, stated so it cannot drift again. Roads used to
+  // grow to 7px at z15 while the country border tapered to 1.15px, so at every
+  // zoom above z6 the roads outweighed the borders and nothing complained: a line
+  // that is too heavy is not an error, a layer still loads and a request still
+  // succeeds. Only reading the widths back can catch it.
+  //
+  // A boundary divides the ground for its own sake; a road is drawn on the ground
+  // and is one of many. The line that answers "which side of this am I on" should
+  // be the heavier one.
+  const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "dark.json"), "utf8"));
+  const layer = (id) => style.layers.find((l) => l.id === id);
+
+  // Evaluate ["interpolate", ["linear"], ["zoom"], z0, v0, z1, v1, ...] at a zoom,
+  // stopping at the last stop instead of past it, which is what the spec does.
+  const atZoom = (expr, z) => {
+    if (!Array.isArray(expr)) return expr;
+    const stops = expr.slice(3);
+    if (z <= stops[0]) return stops[1];
+    if (z >= stops[stops.length - 2]) return stops[stops.length - 1];
+    for (let i = 0; i < stops.length - 2; i += 2) {
+      const [zi, vi, zj, vj] = stops.slice(i, i + 4);
+      if (z >= zi && z <= zj) return vi + ((vj - vi) * (z - zi)) / (zj - zi);
+    }
+    return stops[stops.length - 1];
+  };
+
+  const MAX_ZOOM = 15;
+  const roads = ["road-highway", "road-major", "road-minor", "road-path", "road-rail"]
+    .map((id) => ({ id, w: layer(id).paint["line-width"] }));
+
+  for (const id of ["boundary-region", "boundary-country"]) {
+    const width = layer(id).paint["line-width"];
+    for (let z = 0; z <= MAX_ZOOM; z++) {
+      const border = atZoom(width, z);
+      for (const road of roads) {
+        const roadAt = atZoom(road.w, z);
+        if (roadAt <= 0) continue;
+        assert.ok(border >= roadAt,
+          `${id} is ${border.toFixed(2)}px at z${z} and ${road.id} is ${roadAt.toFixed(2)}px: a road outweighs a boundary`);
+      }
+    }
+  }
+});
+
 await check("a layer waiting on a field names it, and the page says so", () => {
   // A toggle that is correct and silent reads as broken. These two draw nothing until
   // the archive carries a field, so they have to say so rather than look dead.
