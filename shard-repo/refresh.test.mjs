@@ -117,6 +117,12 @@ await check("no eligible build is reported, not guessed", () => {
 await check("the url and file name are the ones Protomaps serves", () => {
   assert.equal(archiveFile("20261003"), "20261003.pmtiles");
   assert.equal(archiveUrl("20261003"), "https://build.protomaps.com/20261003.pmtiles");
+  // The shape builds.json actually returns. Every key in the 62 listed builds
+  // ends in ".pmtiles", so this is the input the refresh really gets. Appending
+  // again here produced 20261010.pmtiles.pmtiles, which 404s, and that 404 is
+  // what failed all 13 shard builds on Sunday 2026-10-11.
+  assert.equal(archiveFile("20261003.pmtiles"), "20261003.pmtiles");
+  assert.equal(archiveUrl("20261003.pmtiles"), "https://build.protomaps.com/20261003.pmtiles");
 });
 
 await check("a plan run writes nothing", () => {

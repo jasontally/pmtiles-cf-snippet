@@ -87,8 +87,18 @@ export function pickTarget(builds, now = new Date()) {
   return { ...eligible[eligible.length - 1], windowOpen: open.toISOString() };
 }
 
+/**
+ * The file name for a build key.
+ *
+ * Protomaps lists keys with the extension already on them ("20261010.pmtiles"),
+ * and the hand-written archive.json used a bare stem ("20241021"). Both name the
+ * same file, so appending unconditionally turns the real keys into
+ * "20261010.pmtiles.pmtiles", which 404s. Appending only when it is missing
+ * makes one key shape work for both, which is what the first Sunday of the
+ * refresh workflow needed and did not have.
+ */
 export function archiveFile(key) {
-  return `${key}.pmtiles`;
+  return key.endsWith(".pmtiles") ? key : `${key}.pmtiles`;
 }
 
 export function archiveUrl(key) {
