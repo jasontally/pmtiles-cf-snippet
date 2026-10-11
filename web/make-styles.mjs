@@ -253,7 +253,7 @@ export const TOGGLE_EXCLUSIONS = ["place-settlement", "road-shield", "address-la
 export const CONTROLS = [
   { group: "Background", keys: ["background", "earth", "landEdge"] },
   { group: "Land", keys: ["forest", "grass", "farmland", "park", "sand", "rock", "ice"] },
-  { group: "Water", keys: ["water", "waterLine"] },
+  { group: "Water", keys: ["water", "waterLine", "shore"] },
   { group: "Roads", keys: ["road", "roadMajor", "roadCasing"] },
   { group: "Boundaries and labels", keys: ["boundary", "label", "halo", "poiLabel"] },
   { group: "Buildings", keys: ["building", "buildingOutline"] },
@@ -402,6 +402,27 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   });
 
   layers.push({
+    id: "shoreline",
+    type: "fill",
+    source: SOURCE_NAME,
+    "source-layer": "earth",
+    // A shoreline. The land's own fill outline cannot do this job: earth is drawn
+    // first, the water fill is drawn over it, and so that outline is buried
+    // wherever water covers land. Drawing the land a second time, after the
+    // water, with its fill transparent, leaves only the outline, and that outline
+    // is now on top.
+    //
+    // This is what makes an ocean meet the land on a dark map, where both are
+    // near black and neither has an edge of its own. Without it the water is a
+    // shape with no boundary and the coast does not exist at all.
+    paint: {
+      "fill-color": p.earth,
+      "fill-opacity": 0,
+      "fill-outline-color": p.shore,
+    },
+  });
+
+  layers.push({
     id: "water-line",
     type: "line",
     source: SOURCE_NAME,
@@ -422,7 +443,16 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     source: SOURCE_NAME,
     "source-layer": "boundaries",
     filter: inKind(["region"]),
-    paint: { "line-color": p.boundary, "line-width": 1, "line-dasharray": [3, 2], "line-opacity": 0.7 },
+    paint: {
+      "line-color": p.boundary,
+      // Solid and at full strength. A state line was a 0.6px dash at 70% opacity,
+      // and a dash that thin on black does not read. A state and its neighbours
+      // should separate at every zoom, not only the closest ones. The dash is
+      // dropped because a dash on a dark ground reads as a broken line rather than
+      // as a boundary.
+      "line-width": 1,
+      "line-opacity": 1,
+    },
   });
 
   layers.push({
@@ -431,7 +461,14 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     source: SOURCE_NAME,
     "source-layer": "boundaries",
     filter: inKind(["country"]),
-    paint: { "line-color": p.boundary, "line-width": ["interpolate", ["linear"], ["zoom"], 0, 0.6, 6, 1.8] },
+    // The boldest hairline on the map. It was a 0.6px slash, which is why a
+    // country border read no stronger than a district road. Solid and at full
+    // strength, so it is the line that separates countries.
+    paint: {
+      "line-color": p.boundary,
+      "line-width": 1,
+      "line-opacity": 1,
+    },
   });
 
   // ---- roads: every class gets a casing and a fill, casings first ----
@@ -805,6 +842,8 @@ export const FLAVORS = {
       // See landEdge: the same colour as the land, so the edge is invisible
       // on a light map. A dark palette sets it independently.
       landEdge: "#e8e2d8",
+    // The shoreline. The land's own edge, so on a light map it is invisible.
+    shore: "#e8e2d8",
     earth: "#f6f2ec",
     rock: "#e8e2d8",
     sand: "#efe6d2",
@@ -844,6 +883,8 @@ export const FLAVORS = {
       // See landEdge: the same colour as the land, so the edge is invisible
       // on a light map. A dark palette sets it independently.
       landEdge: "#eee8dc",
+    // See the light palette: invisible on a light map.
+    shore: "#eee8dc",
     earth: "#fbfaf6",
     rock: "#eee8dc",
     sand: "#f6ecd4",
@@ -928,10 +969,17 @@ export const FLAVORS = {
     // The edges and the thin things, where the contrast budget goes.
     waterLine: "#4d9bd4",
     landEdge: "#5f6d7c",
+    // The shoreline. Brighter than the land edge, because this is the line the
+    // eye traces first: it is where the largest single area on the map ends.
+    // Black water against near black land has no boundary without it.
+    shore: "#8fd0f2",
     boundary: "#8b9bb0",
     // Roads bright, and the highest class the brightest, so hierarchy reads.
-    road: "#cdd3da",
-    roadMajor: "#f2c14e",
+    // A step down from the first draft, which was drawn brighter than the
+    // shorelines and the boundaries and so shouted over them. A road that reads
+    // first in a forest of other lines is a road that won the wrong competition.
+    road: "#b9c3cc",
+    roadMajor: "#edc25c",
     roadCasing: "#000000",
     // Buildings only need to be found against the land.
     building: "#5b6773",
