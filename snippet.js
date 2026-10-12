@@ -72,14 +72,14 @@ const ARCHIVES = {
   // total, headEnd, tileOffset, metaOffset, leafOffset, tileShard, leafShard,
   // tilePartsPerShard
   basemap: {
-    total: 126775469007,
+    total: 138768930345,
     headEnd: 16384,
     tileOffset: 16384,
-    metaOffset: 126450545781,
-    leafOffset: 126450546941,
+    metaOffset: 138416218631,
+    leafOffset: 138416219809,
     tileShard: 2000000,
     leafShard: 160000,
-    tilePartsPerShard: 4864,
+    tilePartsPerShard: 5324,
   },
 };
 

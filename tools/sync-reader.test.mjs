@@ -61,12 +61,16 @@ function headerOf({ rootOffset, rootLength, tileOffset, tileLength, metaOffset, 
   return bytes;
 }
 
-/** The real archive's shape: a 723 byte gap after the root directory. */
+/**
+ * The real archive's shape, read from the live header on 2026-10-12, when the
+ * shards moved from 20241021 to 20261010: a 723 byte gap after the root
+ * directory, and 69,209 tile parts instead of 63,226.
+ */
 const REAL = {
-  rootOffset: 127, rootLength: 15534,
-  tileOffset: 16384, tileLength: 126450529397,
-  metaOffset: 126450545781, metaLength: 1160,
-  leafOffset: 126450546941, leafLength: 324922066,
+  rootOffset: 127, rootLength: 15554,
+  tileOffset: 16384, tileLength: 138416202247,
+  metaOffset: 138416218631, metaLength: 1178,
+  leafOffset: 138416219809, leafLength: 352710536,
 };
 
 /** A fetch that serves the header bytes, so no network is needed. */
@@ -75,19 +79,21 @@ const serveHeader = (bytes, status = 200) => async () =>
 
 await check("it reads the layout out of a header", async () => {
   const layout = await readLayout(serveHeader(headerOf(REAL)));
-  assert.equal(layout.total, 126775469007, "total");
+  assert.equal(layout.total, 138768930345, "total");
   assert.equal(layout.tileDataOffset, 16384, "tileDataOffset");
-  assert.equal(layout.metadataOffset, 126450545781, "metadataOffset");
-  assert.equal(layout.leafDirOffset, 126450546941, "leafDirOffset");
-  assert.equal(layout.tileParts, 63226, "tileParts");
-  assert.equal(layout.tilePartsPerShard, 4864, "tilePartsPerShard");
+  assert.equal(layout.metadataOffset, 138416218631, "metadataOffset");
+  assert.equal(layout.leafDirOffset, 138416219809, "leafDirOffset");
+  assert.equal(layout.tileParts, 69209, "tileParts");
+  assert.equal(layout.tilePartsPerShard, 5324, "tilePartsPerShard");
 });
 
 await check("the padding after the root directory is allowed", async () => {
-  // It is 15,534 bytes starting at 127, so it ends at 15,661 and the tile data
-  // starts at 16,384. PMTiles pads to a boundary, so a gap is normal here.
+  // The root directory ends before the tile data starts, because PMTiles pads
+  // to a boundary, so a gap is normal here. Derived from the fixture so it
+  // holds for whatever archive the shards currently hold.
   const layout = await readLayout(serveHeader(headerOf(REAL)));
-  assert.equal(15_661 < layout.tileDataOffset, true, "the fixture should have a gap");
+  const rootEnd = REAL.rootOffset + REAL.rootLength;
+  assert.equal(rootEnd < layout.tileDataOffset, true, "the fixture should have a gap");
 });
 
 await check("a root directory that runs into the tile data is refused", async () => {
