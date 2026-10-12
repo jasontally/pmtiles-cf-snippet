@@ -175,17 +175,25 @@ const MAX_ZOOM_REF = 15;
  * the ground. Above z6 both borders hold a flat width, and every road class stays
  * under it, so the reading order is: boundary, road, everything else.
  *
+ * The width at the first zoom is the width the road always had, and it is not a
+ * target to be beaten down. Thinning it as well as the z15 width cost a third of
+ * the pixels the roads cover on the light and bright maps — 20.9% to 13.9% of a
+ * 520x230 canvas at the docs page's own z4, and 45.0% to 33.0% at z13 — and the
+ * road network on those maps reads as gone. Only the growth was wrong. The z15
+ * width is what has to come down, because that is the end that outgrew the
+ * borders; the first-zoom width is what makes a motorway a motorway.
+ *
  * Nothing caught the original filter mistake here. Every layer loaded, every
  * request succeeded, and the map looked like a map. The only way to see it is to
  * ask the map what it drew, which is what tools/check-style.mjs does and what
  * every offline check failed to.
  */
 const ROADS = [
-  ["road-highway", ["highway"], 3, 1.2, 2.2],
-  ["road-major", ["major_road"], 4, 1.0, 1.9],
-  ["road-minor", ["minor_road"], 7, 0.55, 1.35],
-  ["road-path", ["path"], 12, 0.28, 0.7],
-  ["road-rail", ["rail"], 11, 0.4, 1.05],
+  ["road-highway", ["highway"], 3, 2.2, 2.8],
+  ["road-major", ["major_road"], 4, 1.7, 2.5],
+  ["road-minor", ["minor_road"], 7, 0.8, 1.7],
+  ["road-path", ["path"], 12, 0.35, 1.0],
+  ["road-rail", ["rail"], 11, 0.5, 1.3],
 ];
 
 /**
@@ -474,8 +482,10 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   //
   // Both borders therefore hold a flat width above z6, where the map has detail
   // everywhere, and every road class stops below them. The margins at z15 are
-  // 0.7px over the top road class for the country border and 0.4px for the
-  // region, which is enough to read as heavier without either looking like a wall.
+  // 0.5px over the top road class for the country border and 0.2px for the region.
+  // The region margin is the tight one to watch: it is the number that failed
+  // first when the road widths were cut too far, because the region border is the
+  // lower of the two and so the first to be caught by a road.
   layers.push({
     id: "boundary-region",
     type: "line",
@@ -489,7 +499,7 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // should separate at every zoom, not only the closest ones. The dash is
       // dropped because a dash on a dark ground reads as a broken line rather than
       // as a boundary.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2.4, 6, 2.6],
+      "line-width": ["interpolate", ["linear"], ["zoom"], 2, 2.4, 6, 3.0],
       "line-opacity": 1,
     },
   });
@@ -505,8 +515,8 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
       // Widest at low zoom, where almost nothing else is drawn and a country
       // border is the only line on screen. At z0 it was 2.6px and was drawn the
       // same weight as a district road while being dimmer than every road colour,
-      // so the roads still won. It widens to 3.4 and settles at 2.9.
-      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 3.4, 6, 2.9],
+      // so the roads still won. It widens to 3.4 and settles at 3.3.
+      "line-width": ["interpolate", ["linear"], ["zoom"], 0, 3.4, 6, 3.3],
       "line-opacity": 1,
     },
   });
