@@ -332,6 +332,23 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   const p = palette;
   const layers = [];
 
+  /**
+   * The colour of bare land, as one shared expression.
+   *
+   * Two layers draw `earth` and both need this exact match. The second is the
+   * shoreline, whose only job is its outline; its fill exists only because
+   * MapLibre cannot draw a fill outline on its own. Give the shoreline a single
+   * flat colour instead and it flattens glaciers, bare rock and sand into one
+   * tone the moment it draws, because a fill paints its body as well.
+   */
+  const EARTH_FILL = [
+    "match", ["get", "kind"],
+    "glacier", p.ice,
+    "bare_rock", p.rock,
+    "sand", p.sand,
+    p.earth,
+  ];
+
   layers.push({ id: "background", type: "background", paint: { "background-color": p.background } });
 
   // ---- land ----
@@ -341,10 +358,40 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     source: SOURCE_NAME,
     "source-layer": "earth",
     paint: {
-      "fill-color": ["match", ["get", "kind"], "glacier", p.ice, "bare_rock", p.rock, "sand", p.sand, p.earth],
+      "fill-color": EARTH_FILL,
       // A land edge, so the ground reads where it meets the black water. Both
       // fills are near black on a dark map, and without this they merge.
       "fill-outline-color": p.landEdge,
+    },
+  });
+
+  // ---- the shoreline ----
+  //
+  // Drawn here, straight after the land it outlines. It used to be drawn after
+  // the water, which is where the idea came from, and that is exactly the bug.
+  //
+  // It is a fill of `earth`, and a fill paints its whole body, not just its
+  // edge. Drawn after the water it covered every land polygon in the ground
+  // colour — and because land cover and land use are polygons inside those same
+  // land polygons, it wiped out both of them. Light and bright went flat cream,
+  // dark went flat black, and only the layers drawn after it survived, which is
+  // why the roads kept showing and almost nothing else did.
+  //
+  // From here it cannot erase them, because they are all drawn after it. Its
+  // fill is EARTH_FILL, the very expression `earth` uses, so the fill repaints
+  // the land identically and is invisible; the outline is the only thing it
+  // adds. The water is drawn after this, so the sea covers the seaward half of
+  // the line and the landward half is left, and that half is the coast, which is
+  // all the separation near-black land and near-black water need.
+  layers.push({
+    id: "shoreline",
+    type: "fill",
+    source: SOURCE_NAME,
+    "source-layer": "earth",
+    paint: {
+      "fill-color": EARTH_FILL,
+      "fill-opacity": 1,
+      "fill-outline-color": p.shore,
     },
   });
 
@@ -425,33 +472,6 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
     "source-layer": "water",
     filter: inKind(["ocean", "lake", "water", "reservoir", "playa", "swimming_pool"]),
     paint: { "fill-color": p.water },
-  });
-
-  layers.push({
-    id: "shoreline",
-    type: "fill",
-    source: SOURCE_NAME,
-    "source-layer": "earth",
-    // A shoreline. The land's own fill outline cannot do this job: earth is drawn
-    // first, the water fill is drawn over it, and so that outline is buried
-    // wherever water covers land. Drawing the land a second time, after the
-    // water, leaves only the outline, and that outline is now on top.
-    //
-    // This is what makes an ocean meet the land on a dark map, where both are
-    // near black and neither has an edge of its own. Without it the water is a
-    // shape with no boundary and the coast does not exist at all.
-    //
-    // The fill is drawn at full opacity, in the ground's own colour, so it is
-    // invisible because it matches the ground it covers rather than because it is
-    // clear. fill-opacity: 0 swallows the outline with it, which is how this layer
-    // shipped invisible: screenshots taken with and without it were byte-identical.
-    // Found by that screenshot comparison, not by a feature count, because
-    // queryRenderedFeatures reports features in a layer whether or not they drew.
-    paint: {
-      "fill-color": p.earth,
-      "fill-opacity": 1,
-      "fill-outline-color": p.shore,
-    },
   });
 
   layers.push({

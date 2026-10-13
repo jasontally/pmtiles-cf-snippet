@@ -827,6 +827,49 @@ await check("a boundary is heavier than every road at every zoom, in every style
   assert.ok(compared > 0, "no width pairs compared, so the rule was never checked");
 });
 
+await check("the shoreline draws before the layers it was erasing", () => {
+  // The shoreline is a fill of `earth` whose only job is its outline. A fill
+  // paints its whole body, so wherever it draws it covers everything under it in
+  // that same area. Land cover and land use are polygons inside the land, so a
+  // shoreline drawn after them repainted the ground colour over both and
+  // flattened the map: light and bright to plain cream, dark to plain black, with
+  // only the layers that came after it still visible. Roads survived and almost
+  // nothing else did, which is what made it look like a roads problem.
+  //
+  // Nothing reported it. Every layer loaded, every request succeeded, every layer
+  // still answered queryRenderedFeatures with features, and the contrast report
+  // was clean, because the layers were all still there and all still drawing.
+  // What changed was which one was on top, and measuring a layer on its own
+  // cannot see that: a covered layer paints perfectly well by itself.
+  const ROAD_IDS = ["road-highway", "road-major", "road-minor", "road-path", "road-rail"];
+
+  for (const flavor of Object.keys(FLAVORS)) {
+    const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${flavor}.json`), "utf8"));
+    const ids = style.layers.map((l) => l.id);
+    const at = (id) => {
+      const i = ids.indexOf(id);
+      assert.notEqual(i, -1, `${flavor}: no layer called ${id}`);
+      return i;
+    };
+    const shore = at("shoreline");
+    for (const under of ["landcover", "landuse", "water"]) {
+      assert.ok(shore < at(under),
+        `${flavor}: shoreline is at ${shore} and ${under} at ${at(under)}, so the shoreline paints over it`);
+    }
+    // And the fill has to be the land's own colour, or it flattens glaciers,
+    // bare rock and sand into one tone wherever it draws.
+    const layer = (id) => style.layers.find((l) => l.id === id);
+    assert.deepEqual(
+      layer("shoreline").paint["fill-color"],
+      layer("earth").paint["fill-color"],
+      `${flavor}: the shoreline fill is not the land's own colour, so it repaints the ground`,
+    );
+    // The order it must keep: land, then its edge, then what covers the land.
+    assert.ok(at("earth") < shore, `${flavor}: the shoreline must follow the land it outlines`);
+    assert.ok(shore < at("road-highway"), `${flavor}: the shoreline must precede the roads`);
+  }
+});
+
 await check("a layer waiting on a field names it, and the page says so", () => {
   // A toggle that is correct and silent reads as broken. These two draw nothing until
   // the archive carries a field, so they have to say so rather than look dead.
