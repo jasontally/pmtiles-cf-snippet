@@ -827,46 +827,52 @@ await check("a boundary is heavier than every road at every zoom, in every style
   assert.ok(compared > 0, "no width pairs compared, so the rule was never checked");
 });
 
-await check("the shoreline draws before the layers it was erasing", () => {
-  // The shoreline is a fill of `earth` whose only job is its outline. A fill
-  // paints its whole body, so wherever it draws it covers everything under it in
-  // that same area. Land cover and land use are polygons inside the land, so a
-  // shoreline drawn after them repainted the ground colour over both and
-  // flattened the map: light and bright to plain cream, dark to plain black, with
-  // only the layers that came after it still visible. Roads survived and almost
-  // nothing else did, which is what made it look like a roads problem.
+await check("the shoreline is an outline on the water, not a redraw of the land", () => {
+  // There was a shoreline layer: a fill of `earth` drawn after the water, there
+  // only to put a line on the coast. It cannot work, because a fill paints its
+  // whole body and not just its edge, so it repainted every land polygon in the
+  // ground colour. Land cover and land use are polygons inside those same land
+  // polygons, so it wiped out both and flattened the map: light and bright to
+  // plain cream, dark to plain black, with only the layers drawn after it still
+  // visible. Roads survived and almost nothing else did, which is what made it
+  // look like a roads problem.
   //
   // Nothing reported it. Every layer loaded, every request succeeded, every layer
   // still answered queryRenderedFeatures with features, and the contrast report
   // was clean, because the layers were all still there and all still drawing.
   // What changed was which one was on top, and measuring a layer on its own
-  // cannot see that: a covered layer paints perfectly well by itself.
-  const ROAD_IDS = ["road-highway", "road-major", "road-minor", "road-path", "road-rail"];
-
+  // cannot see that: a covered layer paints perfectly well by itself, so every
+  // per-layer coverage number said "unchanged" and every one of them was true.
+  //
+  // The coast is the boundary of the water, so the water fill carries it. Two
+  // things have to hold: the layer is gone, so nothing redraws the land, and the
+  // water outline is set, or the dark map loses the coast it was added for.
   for (const flavor of Object.keys(FLAVORS)) {
     const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${flavor}.json`), "utf8"));
     const ids = style.layers.map((l) => l.id);
+    const layer = (id) => style.layers.find((l) => l.id === id);
+
+    assert.equal(ids.includes("shoreline"), false,
+      `${flavor}: a shoreline layer redraws the land and covers the land cover and land use with it`);
+
+    const water = layer("water");
+    assert.ok(water, `${flavor}: no water layer`);
+    assert.ok(water.paint["fill-outline-color"],
+      `${flavor}: the water fill has no outline, so nothing draws a coast and dark loses its shoreline`);
+    assert.equal(water.paint["fill-outline-color"], FLAVORS[flavor].shore,
+      `${flavor}: the water outline is not the palette's shore colour, so the shore control changes nothing`);
+
+    // And the water has to be drawn after the land it covers nothing of, and
+    // before the roads, so the coast is under the labels and lines.
     const at = (id) => {
       const i = ids.indexOf(id);
       assert.notEqual(i, -1, `${flavor}: no layer called ${id}`);
       return i;
     };
-    const shore = at("shoreline");
-    for (const under of ["landcover", "landuse", "water"]) {
-      assert.ok(shore < at(under),
-        `${flavor}: shoreline is at ${shore} and ${under} at ${at(under)}, so the shoreline paints over it`);
-    }
-    // And the fill has to be the land's own colour, or it flattens glaciers,
-    // bare rock and sand into one tone wherever it draws.
-    const layer = (id) => style.layers.find((l) => l.id === id);
-    assert.deepEqual(
-      layer("shoreline").paint["fill-color"],
-      layer("earth").paint["fill-color"],
-      `${flavor}: the shoreline fill is not the land's own colour, so it repaints the ground`,
-    );
-    // The order it must keep: land, then its edge, then what covers the land.
-    assert.ok(at("earth") < shore, `${flavor}: the shoreline must follow the land it outlines`);
-    assert.ok(shore < at("road-highway"), `${flavor}: the shoreline must precede the roads`);
+    assert.ok(at("landcover") < at("water") && at("landuse") < at("water"),
+      `${flavor}: the water must be drawn after the land cover and the land use`);
+    assert.ok(at("water") < at("road-highway"),
+      `${flavor}: the water must be drawn before the roads`);
   }
 });
 

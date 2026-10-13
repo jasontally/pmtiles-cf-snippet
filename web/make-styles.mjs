@@ -367,33 +367,30 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
 
   // ---- the shoreline ----
   //
-  // Drawn here, straight after the land it outlines. It used to be drawn after
-  // the water, which is where the idea came from, and that is exactly the bug.
+  // There is no shoreline layer. There was one, and it was a fill of `earth`
+  // drawn after the water, whose only purpose was to put a line on the coast. It
+  // cannot work: a fill paints its whole body, not just its edge, so it
+  // repainted every land polygon in the ground colour. Land cover and land use are
+  // polygons inside those same land polygons, so it wiped out both of them. Light
+  // and bright went flat cream, dark went flat black, and only the layers drawn
+  // after it survived, which is why the roads kept showing and almost nothing else
+  // did.
   //
-  // It is a fill of `earth`, and a fill paints its whole body, not just its
-  // edge. Drawn after the water it covered every land polygon in the ground
-  // colour — and because land cover and land use are polygons inside those same
-  // land polygons, it wiped out both of them. Light and bright went flat cream,
-  // dark went flat black, and only the layers drawn after it survived, which is
-  // why the roads kept showing and almost nothing else did.
+  // Drawing it earlier, under the land cover, does not rescue it either. The water
+  // is drawn after that and covers the seaward half of the line, so what is left
+  // is a hairline in the place the land edge already draws. Measured, that was
+  // worth 0.05% of the screen: a layer doing nothing, still costing the land
+  // cover it had been eating.
   //
-  // From here it cannot erase them, because they are all drawn after it. Its
-  // fill is EARTH_FILL, the very expression `earth` uses, so the fill repaints
-  // the land identically and is invisible; the outline is the only thing it
-  // adds. The water is drawn after this, so the sea covers the seaward half of
-  // the line and the landward half is left, and that half is the coast, which is
-  // all the separation near-black land and near-black water need.
-  layers.push({
-    id: "shoreline",
-    type: "fill",
-    source: SOURCE_NAME,
-    "source-layer": "earth",
-    paint: {
-      "fill-color": EARTH_FILL,
-      "fill-opacity": 1,
-      "fill-outline-color": p.shore,
-    },
-  });
+  // The coast is the boundary of the water, so the water carries it. A fill
+  // outline is part of the fill and is drawn where the water is drawn, which is
+  // after the land cover and the land use and before the roads. The water fill
+  // only ever paints water polygons, so unlike a redraw of the land it cannot
+  // cover anything that is not water. Lakes and reservoirs get an edge for free,
+  // which is what a shoreline is anyway.
+  //
+  // Checked that the outline does not follow tile edges: the ocean polygon is
+  // clipped at every tile border, and a z5 view of open Pacific draws no grid.
 
   layers.push({
     id: "landcover",
@@ -465,13 +462,18 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
   });
 
   // ---- water ----
+  //
+  // The outline here is the shoreline. It used to be a separate layer that redrew
+  // the land, which is the whole story told above: the coast is the boundary of
+  // the water, so the water carries it, and a fill that only ever paints water
+  // can never cover the land.
   layers.push({
     id: "water",
     type: "fill",
     source: SOURCE_NAME,
     "source-layer": "water",
     filter: inKind(["ocean", "lake", "water", "reservoir", "playa", "swimming_pool"]),
-    paint: { "fill-color": p.water },
+    paint: { "fill-color": p.water, "fill-outline-color": p.shore },
   });
 
   layers.push({
