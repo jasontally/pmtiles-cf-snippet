@@ -20,9 +20,9 @@ const FIRST_SLOT_MINUTE = 30;
 export function slotFor(index) {
   if (ORDER.indexOf(index) < 0) throw new Error(`shard ${index} is not in the refresh order`);
   return {
-    minute: 30,
-    hour: 0,
-    cron: "30 0 1-7 * 0",
+    minute: 25,
+    hour: 3,
+    cron: "25 3 1-7 * 0",
   };
 }
 
