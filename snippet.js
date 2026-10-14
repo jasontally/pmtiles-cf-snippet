@@ -157,7 +157,7 @@ export default {
       // The Protomaps client compares the ETag between requests to notice a new
       // archive. A weak ETag is ignored by the client, so keep this strong.
       ETag: `"${name}-${archive.total}"`,
-      "Cache-Control": "public, max-age=3600",
+      "Cache-Control": "public, max-age=3600, stale-while-revalidate=300",
     });
 
     return new Response(body, { status: 206, headers });

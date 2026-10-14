@@ -452,7 +452,7 @@ async function main() {
   await writeFile(
     join(process.cwd(), "public", "_headers"),
     "/s/*\n" +
-      "\tCache-Control: public, max-age=31536000, immutable\n" +
+      "\tCache-Control: public, max-age=604800, stale-while-revalidate=86400\n" +
       "\tAccess-Control-Allow-Origin: *\n" +
       "\tAccess-Control-Expose-Headers: Content-Length\n"
   );

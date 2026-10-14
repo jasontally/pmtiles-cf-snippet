@@ -1,18 +1,19 @@
 /s/*
-	Cache-Control: public, max-age=31536000, immutable
+	Cache-Control: public, max-age=604800, stale-while-revalidate=86400
 	Access-Control-Allow-Origin: *
 	Access-Control-Expose-Headers: Content-Length
 /font/*
-	Cache-Control: public, max-age=31536000, immutable
+	Cache-Control: public, max-age=2592000, immutable
 	Access-Control-Allow-Origin: *
 /font/OFL.txt
 	Cache-Control: public, max-age=3600
 	Access-Control-Allow-Origin: *
 /sprites/*
-	Cache-Control: public, max-age=86400
+	Cache-Control: public, max-age=604800
 	Access-Control-Allow-Origin: *
 /vendor/*
-	Cache-Control: public, max-age=31536000, immutable
+	Cache-Control: public, max-age=2592000, immutable
 	Access-Control-Allow-Origin: *
 /styles/*
+	Cache-Control: public, max-age=604800
 	Access-Control-Allow-Origin: *
