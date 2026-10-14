@@ -66,20 +66,20 @@ const BUFFER_LIMIT = 1048576;
 // thing that changes, and the index is computed, never stored.
 const SHARD_HOST_PREFIX = "https://s.tiles";
 const SHARD_HOST_SUFFIX = ".jasontally.com";
-const SHARD_COUNT = 13;
+const SHARD_COUNT = 25;
 
 const ARCHIVES = {
   // total, headEnd, tileOffset, metaOffset, leafOffset, tileShard, leafShard,
   // tilePartsPerShard
   basemap: {
-    total: 138768930345,
+    total: 126775469007,
     headEnd: 16384,
     tileOffset: 16384,
-    metaOffset: 138416218631,
-    leafOffset: 138416219809,
-    tileShard: 2000000,
+    metaOffset: 126450545781,
+    leafOffset: 126450546941,
+    tileShard: 1000000,
     leafShard: 160000,
-    tilePartsPerShard: 5324,
+    tilePartsPerShard: 5059,
   },
 };
 

@@ -36,9 +36,9 @@
 
 const API = "https://api.cloudflare.com/client/v4";
 
-const SHARD_COUNT = 13;
-// Parts per shard, from shard-plan.mjs for the Protomaps basemap.
-const TILE_PARTS_PER_SHARD = 4864;
+const SHARD_COUNT = 25;
+// Parts per shard, target for the 1 MB refactor of the Protomaps basemap.
+const TILE_PARTS_PER_SHARD = 5537;
 const WORKER_PREFIX = "pmtiles-shard";
 
 function arg(name, fallback) {

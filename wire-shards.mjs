@@ -32,7 +32,7 @@
 
 import { spawnSync } from "node:child_process";
 
-const SHARD_COUNT = 13;
+const SHARD_COUNT = 25;
 const WORKER_PREFIX = "pmtiles-shard";
 const REPO_OWNER = "jasontally";
 

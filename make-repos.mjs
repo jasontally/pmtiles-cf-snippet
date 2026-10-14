@@ -32,7 +32,7 @@ import { fileURLToPath } from "node:url";
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const TEMPLATE = join(ROOT, "shard-repo");
 
-const SHARD_COUNT = 13;
+const SHARD_COUNT = 25;
 const WORKER_PREFIX = "pmtiles-shard";
 const REPO_PREFIX = "pmtiles-shard";
 
@@ -123,8 +123,8 @@ function stage(index) {
 }
 
 function readmeFor(index, worker) {
-  const first = index * 4864;
-  const last = (index + 1) * 4864 - 1;
+  const first = index * 5537;
+  const last = (index + 1) * 5537 - 1;
   return `# ${repoName(index)}
 
 One shard of the Protomaps basemap. The archive is 118 GiB and a Workers
@@ -191,7 +191,7 @@ function main() {
     for (let i = 0; i < SHARD_COUNT; i++) {
       console.log(
         `${String(i).padEnd(6)}${repoName(i).padEnd(20)}${workerName(i).padEnd(20)}` +
-        `${i * 4864}..${(i + 1) * 4864 - 1}`
+        `${i * 5537}..${(i + 1) * 5537 - 1}`
       );
     }
     console.log("\n--dry-run: nothing was created.");
@@ -238,7 +238,7 @@ function main() {
       git(["-c", "user.name=Jason Tally",
         "-c", "user.email=719178+jasontally@users.noreply.github.com",
         "commit", "-q", "-F", "-"], {
-        input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * 4864} to ${(i + 1) * 4864 - 1}.\n${
+        input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * 5537} to ${(i + 1) * 5537 - 1}.\n${
           i === 0
             ? "\nAlso holds head.bin, meta.bin, and the leaf directories, which\ntogether are 324.9 MB.\n"
             : ""

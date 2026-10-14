@@ -318,16 +318,16 @@ function archiveConfig() {
 async function main() {
   const { url } = archiveConfig();
   const name = env("ARCHIVE_NAME", "basemap");
-  const tileShard = Number(env("TILE_SHARD", "2000000"));
+  const tileShard = Number(env("TILE_SHARD", "1000000"));
   const leafShard = Number(env("LEAF_SHARD", "160000"));
-  const shardCount = Number(env("SHARD_COUNT", "13"));
+  const shardCount = Number(env("SHARD_COUNT", "25"));
   const shardIndex = Number(env("SHARD_INDEX", ""));
   const dryRun = env("DRY_RUN", "0") === "1";
   const skipDownload = env("SKIP_DOWNLOAD", "0") === "1";
 
   if (!url.includes("http")) fail(`the archive url looks wrong: ${url}`);
   if (!Number.isInteger(shardIndex) || shardIndex < 0 || shardIndex >= shardCount) {
-    fail(`set SHARD_INDEX to a whole number from 0 to ${shARDCount - 1}`);
+    fail(`set SHARD_INDEX to a whole number from 0 to ${shardCount - 1}`);
   }
 
   const outDir = join(process.cwd(), "public", "s", name);
