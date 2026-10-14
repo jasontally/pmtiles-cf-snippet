@@ -55,8 +55,7 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `shard-repo/` | The template pushed to each of the 13 shard repos. |
 | `make-repos.mjs` | Creates the shard repos and pushes the template. |
 | `wire-shards.mjs` | Binds each shard repo to its Worker through the API. |
-| `refresh.md` | The weekly data refresh: the window, and how it runs. |
-| `pmtiles-shard-spec.md` | Full specification and measurements. |
+| `refresh.md` | The monthly data refresh: the window, and how it runs. || `pmtiles-shard-spec.md` | Full specification and measurements. |
 
 ## Use
 

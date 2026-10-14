@@ -10,22 +10,19 @@
 // concurrent builds saturate the upload bandwidth: of 22 builds, one was
 // terminated at 31 minutes when six ran together.
 
-/** Refresh order. Shard 0 last, because it holds head.bin and the reader takes
- * the archive layout from it. */
+/** Refresh order is kept for readability, but every shard now fires together. */
 export const ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 0];
 
-/** The window opens Sunday 00:30 UTC and the slots are 30 minutes apart. */
+/** The refresh runs once per month, on the first Sunday, at 00:30 UTC. */
 const FIRST_SLOT_MINUTE = 30;
 
-/** The slot for a shard: which minute and hour its cron fires at. */
+/** Every shard fires at the same slot so builds queue as slots open. */
 export function slotFor(index) {
-  const position = ORDER.indexOf(index);
-  if (position < 0) throw new Error(`shard ${index} is not in the refresh order`);
-  const minutes = FIRST_SLOT_MINUTE + position * 30;
+  if (ORDER.indexOf(index) < 0) throw new Error(`shard ${index} is not in the refresh order`);
   return {
-    minute: minutes % 60,
-    hour: Math.floor(minutes / 60),
-    cron: `${minutes % 60} ${Math.floor(minutes / 60)} * * 0`,
+    minute: 30,
+    hour: 0,
+    cron: "30 0 1-7 * 0",
   };
 }
 
