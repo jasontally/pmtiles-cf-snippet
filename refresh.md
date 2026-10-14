@@ -1,4 +1,4 @@
-# Weekly data refresh
+# Monthly data refresh
 
 ## When Protomaps publishes
 
@@ -160,7 +160,7 @@ and a short read gives parts that are the right length and the wrong bytes, whic
 no size check catches. The anchor already keeps a build days old, so this is a
 second line of defence, and the script refuses rather than proceeding if it fails.
 
-### Most Sundays nothing happens
+### Most months nothing happens
 
 If the target equals what the shard already holds, `refresh.mjs` reports no change
 and makes no commit, so no build runs and nothing uploads. A refresh is 13 builds
