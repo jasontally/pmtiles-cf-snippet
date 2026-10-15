@@ -90,6 +90,10 @@ const MODULE_FILE = "snippet.js";
  * version in them.
  */
 const HEADERS_FILE =
+  "/preload/*\n" +
+  "\tCache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400\n" +
+  "\tCloudflare-CDN-Cache-Control: max-age=2592000\n" +
+  "\tAccess-Control-Allow-Origin: *\n" +
   "/s/*\n" +
   "\tCache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400\n" +
   "\tCloudflare-CDN-Cache-Control: max-age=2592000\n" +
