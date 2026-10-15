@@ -62,7 +62,7 @@ import {
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, "public");
 const DIST_DIR = join(ROOT, "dist");
-const SNIPPET_SOURCE = resolve(ROOT, env("SNIPPET_SOURCE", "snippet.js"));
+const SNIPPET_SOURCE = resolve(ROOT, process.env.SNIPPET_SOURCE || "snippet.js");
 const TOOL = join(ROOT, "shard-pmtiles.py");
 const API = "https://api.cloudflare.com/client/v4";
 
