@@ -23,12 +23,38 @@ function flag(name, fallback) {
 const args = process.argv.slice(2);
 const outDir = flag("--out", "public");
 const tileShard = Number(flag("--tile-shard", "1000000"));
-const shardPartsPerShard = Number(flag("--parts", "5059"));
+const shardCount = Number(flag("--shards", "25"));
+// Optional override. When it is absent the count is derived from the archive
+// header, so it cannot disagree with the shard build.
+const explicitParts = flag("--parts", "");
+const tablePath = flag("--table", "dist/preload-table.txt");
 const limit = Number(flag("--limit", "Infinity"));
+const liveArchive = flag("--live-archive", "");
 let archivePath = flag("--archive", "");
 
+// The table has to describe the bytes the pmtiles snippet actually serves, or
+// every preload warms the wrong part. The shards' archive.json is not a
+// reliable signal: each shard repo commits its own copy, and this repo only
+// holds the seed. So probe the served archive first. A build that has a local
+// archive uses that instead: it is about to publish those bytes.
+if (archivePath === "" && !args.includes("--archive") && liveArchive) {
+  let reachable = false;
+  try {
+    const probe = await fetch(liveArchive, { headers: { Range: "bytes=0-99" } });
+    reachable = probe.ok;
+    if (!reachable) console.log(`served archive ${liveArchive} returned ${probe.status}`);
+  } catch (error) {
+    console.log(`served archive ${liveArchive} is unreachable: ${error.message}`);
+  }
+  if (reachable) {
+    archivePath = liveArchive;
+    console.log(`using the served archive ${liveArchive}`);
+  }
+}
+
 if (archivePath === "" && !args.includes("--archive")) {
-  // Pick the same Protomaps build the shards use, without downloading it.
+  // Fallback for a host that serves nothing yet: pick the same Protomaps
+  // build the shards refresh to, without downloading it.
   const buildsResp = await fetch("https://build-metadata.protomaps.dev/builds.json");
   const builds = await buildsResp.json();
   const now = new Date();
@@ -102,6 +128,14 @@ const headerBytes = await getBytes(0, pm.HEADER_SIZE_BYTES || 127);
 const header = pm.bytesToHeader(headerBytes instanceof Uint8Array ? headerBytes.buffer : headerBytes, null);
 const rootDirectory = await directoryAt(header.rootDirectoryOffset, header.rootDirectoryLength);
 
+const tilePartCount = Math.ceil(header.tileDataLength / tileShard);
+const shardPartsPerShard = explicitParts
+  ? Number(explicitParts)
+  : Math.ceil(tilePartCount / shardCount);
+if (!Number.isInteger(shardPartsPerShard) || shardPartsPerShard <= 0) {
+  throw new Error(`bad shard size: ${shardPartsPerShard}`);
+}
+
 function findTile(entries, tileId) {
   return (pm.findTile ? pm.findTile(entries, tileId) : entries.find((e) => e.tileId <= tileId && tileId < e.tileId + e.runLength));
 }
@@ -138,6 +172,7 @@ for (let lat = -90; lat < 90; lat += 10) {
 }
 if (limit < cells.length) cells = cells.slice(0, limit);
 
+const tableRows = [];
 let written = 0;
 for (const cell of cells) {
   const centerLat = cell.lat + 5;
@@ -153,14 +188,22 @@ for (const cell of cells) {
     }
   }
   if (!parts.size) continue;
-  const urls = [...parts].sort((a, b) => a - b).map((part) => {
+  const sorted = [...parts].sort((a, b) => a - b);
+  const urls = sorted.map((part) => {
     const host = Math.floor(part / shardPartsPerShard);
     return `https://s.tiles${host}.jasontally.com/s/basemap/tile/${String(part).padStart(6, "0")}.bin`;
   });
   const key = `${Math.floor(cell.lat / 10) * 10}_${Math.floor(cell.lon / 10) * 10}`;
   writeFileSync(join(outBase, `${encodeURIComponent(key)}.json`), JSON.stringify(urls));
+  tableRows.push(`${key}:${sorted.join(",")}`);
   written++;
   console.log(`wrote ${written}: ${key} (${parts.size} parts)`);
 }
+
+mkdirSync(dirname(tablePath), { recursive: true });
+// Parts per shard goes first, then one "key:parts" entry per cell. The snippet
+// splits on semicolons and reads the count from the first chunk.
+writeFileSync(tablePath, `${shardPartsPerShard};${tableRows.join(";")}`);
+console.log(`wrote ${tableRows.length} table entries to ${tablePath}`);
 
 console.log(`wrote ${written} preload buckets to ${outBase}`);

@@ -6,7 +6,7 @@
  */
 
 import assert from "node:assert/strict";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -140,6 +140,10 @@ process.exit(0);
         ARCHIVE_PATH: "",
         ARCHIVE_URL: "",
         SKIP_ASSETS: "1",
+        // The preload generator reads a live archive over the network, which
+        // would make every test slow and flaky. One test below writes a table
+        // directly. The full generator runs on the real build only.
+        SKIP_PRELOAD_GENERATOR: "1",
         DOWNLOAD: "0",
         ...env,
       },
@@ -231,7 +235,7 @@ await check("does not reorder the rule list on a redeploy", async () => {
     const names = JSON.parse(puts.at(-1).body).rules.map((r) => r.snippet_name);
     assert.deepEqual(
       names,
-      ["icanhazip", "mcp_lookup", "pmtiles"],
+      ["icanhazip", "mcp_lookup", "pmtiles", "preload"],
       `the list changed order: ${JSON.stringify(names)}`
     );
   } finally {
@@ -574,6 +578,29 @@ await check("public/_headers is committed so the assets directory exists", () =>
     text.includes("max-age=31536000"),
     "parts are immutable, so they must be cached for a year"
   );
+});
+
+await check("inlines the generated preload table into the preload snippet", async () => {
+  const api = await mockApi();
+  const tablePath = join(dirname(BUILD), "dist", "preload-table.txt");
+  const saved = existsSync(tablePath) ? readFileSync(tablePath, "utf8") : null;
+  try {
+    mkdirSync(dirname(tablePath), { recursive: true });
+    writeFileSync(tablePath, "5059;20_-90:6,7,8;40_0:6");
+    const run = await runBuild(CREDENTIALS, api.base, "deploy");
+    assert.equal(run.status, 0, `build failed:\n${run.stdout}\n${run.stderr}`);
+    const upload = api.requests.find((r) => r.url === "/zones/zone123/snippets/preload");
+    assert.ok(upload, "did not PUT the preload snippet");
+    assert.ok(
+      upload.body.includes("5059;20_-90:6,7,8;40_0:6"),
+      "the generated table must be in the uploaded code"
+    );
+    assert.ok(!upload.body.includes("__PRELOAD_TABLE__"), "the marker must be replaced");
+  } finally {
+    if (saved === null) rmSync(tablePath, { force: true });
+    else writeFileSync(tablePath, saved);
+    await api.close();
+  }
 });
 
 await check("reports the minified size and the hash", async () => {

@@ -39,6 +39,10 @@
  *   ARCHIVE_NAME           archive name in URLs (default: file stem)
  *   TILE_SHARD             tile part size (default: 2000000)
  *   LEAF_SHARD             leaf part size (default: 160000)
+ *   SHARD_COUNT            number of shard Workers (default: 25)
+ *   PRELOAD_ARCHIVE_URL    archive the preload table describes (default: the
+ *                          URL this host serves, when SNIPPET_HOST is set)
+ *   SKIP_PRELOAD_GENERATOR 1 to skip the preload table and buckets (default: 0)
  *   DOWNLOAD               0 to never download (default: 1)
  *   SKIP_VERIFY            1 to skip the byte for byte check (default: 0)
  *   SKIP_ASSETS            1 to skip the asset upload (default: 0)
@@ -56,7 +60,7 @@ import { tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
 import {
-  foreignRules, lostRules, mergeSnippetRule, rulesMatch,
+  foreignRules, lostRules, mergeSnippetRule, rulesMatch, writable, WRITABLE,
 } from "./snippet-rules.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
@@ -106,7 +110,7 @@ const HEADERS_FILE =
   "\tCache-Control: public, max-age=3600\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   "/sprites/*\n" +
-  "\tCache-Control: public, max-age=86400\n" +
+  "\tCache-Control: public, max-age=604800\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   "/vendor/*\n" +
   "\tCache-Control: public, max-age=31536000, immutable\n" +
@@ -572,6 +576,78 @@ function zoneCandidates(host) {
  * exactly "/<name>.pmtiles". A narrower expression needs `matches` or
  * `ends_with`, and `ends_with` is a Business plan function.
  */
+function mergeSnippetRules(observed, ours) {
+  const ownNames = new Set(ours.map((rule) => rule.snippet_name));
+  const seen = new Set();
+  const reordered = (Array.isArray(observed) ? observed : []).map((rule) => {
+    if (!ownNames.has(rule.snippet_name)) return writable(rule);
+    if (seen.has(rule.snippet_name)) return null;
+    seen.add(rule.snippet_name);
+    const replacement = ours.find((item) => item.snippet_name === rule.snippet_name);
+    return replacement ? { ...replacement } : writable(rule);
+  }).filter(Boolean);
+  for (const rule of ours) {
+    if (!seen.has(rule.snippet_name)) {
+      seen.add(rule.snippet_name);
+      reordered.push({ ...rule });
+    }
+  }
+  return reordered;
+}
+
+function rulesMatchMultiple(desired, observed) {
+  if (!Array.isArray(observed) || desired.length !== observed.length) return false;
+  return desired.every((want, index) => {
+    const got = writable(observed[index] || {});
+    return WRITABLE.every((key) => got[key] === want[key]);
+  });
+}
+
+function preloadRule() {
+  const override = env("PRELOAD_SNIPPET_RULE", "");
+  if (override) return override;
+  const host = env("SNIPPET_HOST", "tiles.example.com");
+  return `(http.host eq "${host}" and http.request.uri.path eq "/" and not http.request.headers["x-tiles-preload"][0] eq "1")`;
+}
+
+/**
+ * Put the generated table into the preload snippet.
+ *
+ * The table is one string written by tools/generate-preloads.mjs:
+ * parts-per-shard, then one "key:parts" entry per ten-degree cell, separated by
+ * semicolons. The snippet carries it so it needs no bucket request: a second
+ * subrequest to the same zone fails in the Snippets runtime.
+ *
+ * When the file is missing the marker stays in place and parses as an empty
+ * table. The snippet still deploys, and injects nothing.
+ */
+function inlinePreloadTable(source) {
+  const marker = '"__PRELOAD_TABLE__"';
+  if (!source.includes(marker)) {
+    console.log("preload snippet has no table marker, leaving it alone");
+    return source;
+  }
+  const path = join(DIST_DIR, "preload-table.txt");
+  if (!existsSync(path)) {
+    console.log(`no ${path}, the preload snippet will inject nothing`);
+    return source;
+  }
+  const table = readFileSync(path, "utf8").trim();
+  if (!/^\d+;/.test(table)) {
+    fail(`${path} does not start with a parts-per-shard count and a semicolon`);
+  }
+  const cells = table.slice(table.indexOf(";") + 1).split(";").length;
+  console.log(`preload table ${Buffer.byteLength(table)} bytes, ${cells} cells`);
+  return source.replace(marker, JSON.stringify(table));
+}
+
+function buildMultipartForm(small) {
+  const form = new FormData();
+  form.append("metadata", JSON.stringify({ main_module: "snippet.js" }));
+  form.append("snippet.js", new Blob([small], { type: "text/javascript" }), "snippet.js");
+  return form;
+}
+
 function snippetRule() {
   const override = env("SNIPPET_RULE", "");
   if (override) return override;
@@ -580,75 +656,86 @@ function snippetRule() {
 }
 
 async function deploySnippet() {
-  if (flag("SKIP_SNIPPET", "0")) {
-    console.log("SKIP_SNIPPET=1, skipping");
-    return;
-  }
   const zone = await resolveZone();
-  const name = env("SNIPPET_NAME", "pmtiles");
-  if (!/^[a-z0-9_]+$/.test(name)) {
-    fail(`SNIPPET_NAME ${name} must use only a-z, 0-9 and _`);
-  }
 
-  const small = await minifySnippet();
-
-  const expression = snippetRule();
-
-  // The rule description is the only place the zone records which build is
-  // installed, because the API will not hand the snippet code back. Without it
-  // there is no way to tell a zone running last week's build from this week's,
-  // short from uploading again. Workers Builds injects this on every build.
+  // Descriptions and host thresholds are specific to these two snippets; both
+  // are published on every root deployment so the root page can warm caches.
   const buildId =
     process.env.WORKERS_CI_BUILD_UUID || new Date().toISOString().slice(0, 19) + "Z";
-  const description = env(
+  const primaryDescription = env(
     "SNIPPET_RULE_DESCRIPTION",
     `PMTiles range requests (${buildId})`
   );
 
-  const rulesRoute = `/zones/${zone.id}/snippets/snippet_rules`;
+  // Build the desired snippet set. A caller can still point the build at a single
+  // snippet file through SNIPPET_SOURCE, but the root preload snippet is always
+  // published alongside the tile snippet it points at.
+  const specs = [
+    {
+      name: env("SNIPPET_NAME", "pmtiles"),
+      sourcePath: SNIPPET_SOURCE,
+      expression: snippetRule(),
+      description: primaryDescription,
+    },
+    {
+      name: "preload",
+      sourcePath: resolve(ROOT, env("PRELOAD_SNIPPET_SOURCE", "preload-snippet.js")),
+      inlineTable: true,
+      expression: env("PRELOAD_SNIPPET_RULE", preloadRule()),
+      description: env("PRELOAD_SNIPPET_DESCRIPTION", `Root preload link injection (${buildId})`),
+    },
+  ].filter((spec, index, list) =>
+    list.findIndex((other) => other.name === spec.name) === index
+  );
 
-  // A zone that never had a rule list 404s, which means "no rules" rather than
-  // a failure. Anything else is real.
+  // Minify each before touching the zone, so fail before changing any rule.
+  const snippets = [];
+  for (const spec of specs) {
+    const source = readFileSync(spec.sourcePath, "utf8");
+    const prepared = spec.inlineTable ? inlinePreloadTable(source) : source;
+    const snippet = await minifySnippet(spec.sourcePath, spec.name, prepared);
+    console.log(`snippet ${spec.name}: ${Buffer.byteLength(snippet)} bytes`);
+    snippets.push({ ...spec, code: snippet });
+  }
+
+  const rulesRoute = `/zones/${zone.id}/snippets/snippet_rules`;
+  console.log(`zone     ${zone.name || zone.id} (${zone.id})`);
+  console.log(`build    ${buildId}`);
+
   const observed = await apiCall(rulesRoute).catch((error) => {
     if (/\b404\b/.test(error.message)) return null;
     throw error;
   });
+  const ownNames = new Set(snippets.map((s) => s.name));
+  const foreign = foreignRules(observed, snippets[0].name).filter(
+    (rule) => !ownNames.has(rule.snippet_name)
+  );
+  const ours = snippets.map((spec) => ({
+    snippet_name: spec.name,
+    expression: spec.expression,
+    description: spec.description,
+    enabled: true,
+  }));
+  const desiredRules = mergeSnippetRules(observed, ours);
+  const needsRules = !rulesMatchMultiple(desiredRules, observed, ownNames);
 
-  // PUT replaces the WHOLE list and this zone is shared. Merge into whatever is
-  // installed rather than replacing the list, or another project's rule goes.
-  const ourRule = { snippet_name: name, expression, description, enabled: true };
-  const desiredRules = mergeSnippetRule(observed, ourRule);
-  const foreign = foreignRules(observed, name);
-  const needsRules = !rulesMatch(desiredRules, observed);
-
-  const installed = (observed || []).find((rule) => rule.snippet_name === name);
-  console.log(`zone     ${zone.name || zone.id} (${zone.id})`);
   console.log(`current  ${observed ? `${observed.length} rule(s)` : "no rule list"}`);
   console.log(
     `keeping  ${foreign.length} rule(s) owned by others: ` +
     `${foreign.map((r) => r.snippet_name).join(", ") || "none"}`
   );
-  console.log(`stamp    ${installed ? installed.description : "(no rule for this snippet)"}`);
-  console.log(`build    ${buildId}`);
-  console.log(`rule     ${expression}`);
   console.log(`plan     rules: ${needsRules ? "update" : "already current"}`);
 
-  // The Snippets API takes the code as multipart form data.
-  const form = new FormData();
-  form.append("metadata", JSON.stringify({ main_module: MODULE_FILE }));
-  form.append(
-    MODULE_FILE,
-    new Blob([small], { type: "text/javascript" }),
-    MODULE_FILE
-  );
-  const upload = await apiCall(`/zones/${zone.id}/snippets/${name}`, {
-    method: "PUT",
-    body: form,
-  });
-  console.log(
-    `uploaded  snippet_name=${upload?.snippet_name || name} ` +
-    `modified_on=${upload?.modified_on ?? "n/a"}`
-  );
+  for (const snippet of snippets) {
+    const upload = await apiCall(`/zones/${zone.id}/snippets/${snippet.name}`, {
+      method: "PUT",
+      body: buildMultipartForm(snippet.code),
+    });
+    console.log(
+      `uploaded  snippet_name=${upload?.snippet_name || snippet.name} ` +
+      `modified_on=${upload?.modified_on ?? "n/a"}`
+    );
+  }
 
   if (needsRules) {
     await apiCall(rulesRoute, {
@@ -661,11 +748,11 @@ async function deploySnippet() {
     console.log("rules     unchanged");
   }
 
-  // Read the list back and prove every foreign rule survived. A PUT that drops
-  // another project's rule is silent: it returns 200 with the shortened list.
-  // This is the only place that failure becomes visible.
   const finalRules = (await apiCall(rulesRoute)) || [];
-  const lost = lostRules(foreign, finalRules);
+  const allForeign = foreignRules(observed, "").filter((r) =>
+    !ownNames.has(r.snippet_name)
+  );
+  const lost = lostRules(allForeign.length ? allForeign : foreign, finalRules);
   if (lost.length > 0) {
     console.error(
       `ABORT: the PUT removed rule(s) owned by another project: ` +
@@ -674,13 +761,12 @@ async function deploySnippet() {
     );
     process.exit(1);
   }
-  const survivors = foreignRules(finalRules, name);
+  const survivors = finalRules.filter((r) => !ownNames.has(r.snippet_name));
   console.log(
     `verify    ${finalRules.length} rule(s); ${survivors.length} foreign rule(s) intact: ` +
     `${survivors.map((r) => r.snippet_name).join(", ") || "none"}`
   );
 }
-
 /* ---------------------------------------------------------------- *
  * Main.
  * ---------------------------------------------------------------- */
@@ -708,9 +794,22 @@ async function prepare() {
     const generatorArgs = [
       join(ROOT, "tools", "generate-preloads.mjs"),
       "--out", PUBLIC_DIR,
+      // The part size and count must match the snippet's ARCHIVES entry and the
+      // shard builds, or every part number in the table points at the wrong file.
       "--tile-shard", env("TILE_SHARD", "1000000"),
-      "--parts", "5059",
+      "--shards", env("SHARD_COUNT", "25"),
+      "--table", join(DIST_DIR, "preload-table.txt"),
     ];
+    // An explicit archive is about to be published, so it is the right source.
+    // Otherwise the table follows the archive the deployment serves, with the
+    // weekly Protomaps build as the fallback for a host with nothing live yet.
+    const liveArchive = env(
+      "PRELOAD_ARCHIVE_URL",
+      env("SNIPPET_HOST", "")
+        ? `https://${env("SNIPPET_HOST")}/${env("ARCHIVE_NAME", "basemap")}.pmtiles`
+        : ""
+    );
+    if (liveArchive) generatorArgs.push("--live-archive", liveArchive);
     if (archive) generatorArgs.push("--archive", archive);
     run("node", generatorArgs);
   }
@@ -871,12 +970,15 @@ async function deploy() {
 }
 
 /** Minify, check the size and the export, and return the code. */
-async function minifySnippet() {
-  const name = env("SNIPPET_NAME", "pmtiles");
+async function minifySnippet(
+  sourcePath = SNIPPET_SOURCE,
+  name = env("SNIPPET_NAME", "pmtiles"),
+  sourceText = null
+) {
   if (!/^[a-z0-9_]+$/.test(name)) {
     fail(`SNIPPET_NAME ${name} must use only a-z, 0-9 and _`);
   }
-  const source = readFileSync(SNIPPET_SOURCE, "utf8");
+  const source = sourceText ?? readFileSync(sourcePath, "utf8");
   const small = minify(source);
   const rawBytes = Buffer.byteLength(source);
   const smallBytes = Buffer.byteLength(small);
