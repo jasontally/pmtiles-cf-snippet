@@ -62,7 +62,7 @@ import {
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, "public");
 const DIST_DIR = join(ROOT, "dist");
-const SNIPPET_SOURCE = join(ROOT, "snippet.js");
+const SNIPPET_SOURCE = resolve(ROOT, env("SNIPPET_SOURCE", "snippet.js"));
 const TOOL = join(ROOT, "shard-pmtiles.py");
 const API = "https://api.cloudflare.com/client/v4";
 
@@ -693,6 +693,16 @@ async function prepare() {
   if (haveAssets) {
     step("verify the asset files");
     verify(archive);
+    if (archive) {
+      step("generate root preload buckets");
+      run("node", [
+        join(ROOT, "tools", "generate-preloads.mjs"),
+        archive,
+        PUBLIC_DIR,
+        env("TILE_SHARD", "1000000"),
+        "5059",
+      ]);
+    }
   } else {
     console.log("\n=== no asset tree, skipping verify");
   }

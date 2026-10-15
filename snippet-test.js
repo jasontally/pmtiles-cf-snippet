@@ -562,21 +562,21 @@ async function main() {
     tileOffset: 16384,
     metaOffset: 126450545781,
     leafOffset: 126450546941,
-    tileShard: 2000000,
+    tileShard: 1000000,
     leafShard: 160000,
-    tilePartsPerShard: 4864,
+    tilePartsPerShard: 5059,
   };
 
   /** Byte offset of tile part N. */
   const tilePartStart = (n) => BASEMAP.tileOffset + n * BASEMAP.tileShard;
 
   await checkAsync("the real table routes tile parts to the right shard", async () => {
-    assert.equal(real.SHARDS, 13);
+    assert.equal(real.SHARDS, 25);
     const cases = [
-      [0, 0], [1, 0], [4863, 0],
-      [4864, 1], [4865, 1], [9727, 1],
-      [9728, 2], [19455, 3],
-      [38816, 7], [58368, 12], [63225, 12],
+      [0, 0], [1, 0], [5058, 0],
+      [5059, 1], [5060, 1], [10117, 1],
+      [10118, 2], [15176, 2],
+      [35413, 7], [60707, 11], [126450, 24],
     ];
     for (const [part, shard] of cases) {
       const start = tilePartStart(part);
@@ -589,27 +589,27 @@ async function main() {
   });
 
   await checkAsync("the real table puts every tile part on a shard that exists", async () => {
-    for (const part of [0, 4864, 30000, 63224, 63225]) {
+    for (const part of [0, 5059, 30000, 126449, 126450]) {
       const start = tilePartStart(part);
       const reads = real.planReads(start, start, BASEMAP);
       assert.equal(reads.length, 1);
       assert.ok(reads[0].host >= 0 && reads[0].host < real.SHARDS, `shard ${reads[0].host}`);
     }
     // The last tile part is short: the tile section does not divide evenly.
-    const lastPartStart = tilePartStart(63225);
+    const lastPartStart = tilePartStart(126450);
     assert.equal(
       BASEMAP.metaOffset - lastPartStart,
       529397,
-      "the last tile part should be 529,397 B, which shard-12 serves"
+      "the last tile part should be 529,397 B, which shard-24 serves"
     );
   });
 
   await checkAsync("the real table spans a shard boundary in 2 reads", async () => {
-    const start = tilePartStart(4863) + BASEMAP.tileShard - 100;
+    const start = tilePartStart(5058) + BASEMAP.tileShard - 100;
     const reads = real.planReads(start, start + 300, BASEMAP);
     assert.equal(reads.length, 2);
     assert.deepEqual(reads.map((r) => r.host), [0, 1]);
-    assert.deepEqual(reads.map((r) => r.index), [4863, 4864]);
+    assert.deepEqual(reads.map((r) => r.index), [5058, 5059]);
     // The bytes must add up to the range, with no gap or overlap.
     const covered = reads.reduce((sum, r) => sum + r.length, 0);
     assert.equal(covered, 301);
