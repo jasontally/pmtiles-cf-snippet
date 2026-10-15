@@ -87,10 +87,15 @@ function deserializeIndex(buffer) {
   return entries;
 }
 
+const directoryCache = new Map();
 async function directoryAt(offset, length) {
+  const key = `${offset}:${length}`;
+  if (directoryCache.has(key)) return directoryCache.get(key);
   const slice = await getBytes(offset, length);
   const data = decompress(slice, header.internalCompression);
-  return deserializeIndex(data);
+  const result = deserializeIndex(data);
+  directoryCache.set(key, result);
+  return result;
 }
 
 const headerBytes = await getBytes(0, pm.HEADER_SIZE_BYTES || 127);
