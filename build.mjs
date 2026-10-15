@@ -91,7 +91,8 @@ const MODULE_FILE = "snippet.js";
  */
 const HEADERS_FILE =
   "/s/*\n" +
-  "\tCache-Control: public, max-age=31536000, immutable\n" +
+  "\tCache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400\n" +
+  "\tCloudflare-CDN-Cache-Control: max-age=2592000\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   "\tAccess-Control-Expose-Headers: Content-Length\n" +
   "/font/*\n" +
@@ -107,6 +108,7 @@ const HEADERS_FILE =
   "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   "/styles/*\n" +
+  "\tCache-Control: public, max-age=604800\n" +
   "\tAccess-Control-Allow-Origin: *\n";
 
 const env = (key, fallback) => {

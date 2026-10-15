@@ -194,7 +194,7 @@ change, so:
 
 ```txt
 /s/*
-	Cache-Control: public, max-age=31536000, immutable
+	Cache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400
 	Access-Control-Allow-Origin: *
 	Access-Control-Expose-Headers: Content-Length
 ```
@@ -276,7 +276,7 @@ Content-Length: <end - start + 1>
 Content-Range: bytes <start>-<end>/<total>
 Accept-Ranges: bytes
 ETag: "<name>-<total>"
-Cache-Control: public, max-age=3600
+Cache-Control: public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400
 Access-Control-Expose-Headers: ETag, Content-Range, Accept-Ranges, Content-Length
 ```
 

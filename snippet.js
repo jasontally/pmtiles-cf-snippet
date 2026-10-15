@@ -56,11 +56,12 @@ const MAX_SUBREQUESTS = 2;
 // 150,036 B is the largest real request. 512 KiB leaves room for a client that
 // asks for more, and stays far under the 2 MB memory limit.
 const MAX_RESPONSE = 524288;
-// A tile part is 2 MB, which does not fit in the 2 MB memory limit alongside the
-// answer buffer. So a part larger than this is streamed and only the bytes the
-// client asked for are kept. head, meta and leaf parts are all under it and are
-// read in one piece, which is cheaper than streaming.
-const BUFFER_LIMIT = 1048576;
+// A tile part is now 1 MB. That is close enough to the 2 MB memory limit that
+// buffering a whole part (plus the answer) risks the limit, and the allocation
+// cost is measurable in Node. So stream every part above 512 KiB and keep only
+// the bytes the client asked for. head, meta and leaf parts are all under it
+// and are still read in one piece.
+const BUFFER_LIMIT = 524288;
 
 // The shard host names. Written as a pattern because the index is the only
 // thing that changes, and the index is computed, never stored.
@@ -157,7 +158,7 @@ export default {
       // The Protomaps client compares the ETag between requests to notice a new
       // archive. A weak ETag is ignored by the client, so keep this strong.
       ETag: `"${name}-${archive.total}"`,
-      "Cache-Control": "public, max-age=3600, stale-while-revalidate=300",
+      "Cache-Control": "public, max-age=604800, s-maxage=604800, stale-while-revalidate=86400",
     });
 
     return new Response(body, { status: 206, headers });
@@ -381,7 +382,9 @@ function corsHeaders(request, extra) {
     : ALLOWED_ORIGINS.split(",").map((value) => value.trim());
   if (origin && (allowed === "*" || allowed.includes(origin))) {
     headers.set("Access-Control-Allow-Origin", allowed === "*" ? "*" : origin);
-    headers.append("Vary", "Origin");
+    // A wildcard origin is the same for every request, so it must not fragment
+    // the cache. Only echo lists vary by origin.
+    if (allowed !== "*") headers.append("Vary", "Origin");
   }
   headers.set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS");
   headers.set("Access-Control-Expose-Headers", CORS_EXPOSE);
