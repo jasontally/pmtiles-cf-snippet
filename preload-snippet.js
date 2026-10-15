@@ -11,7 +11,7 @@ function bucket(lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
   // Ten-degree cells, kept coarse so the generated table stays small.
-  return `${Math.floor(lat / 10) * 10}:${Math.floor(lon / 10) * 10}`;
+  return `${Math.floor(lat / 10) * 10}_${Math.floor(lon / 10) * 10}`;
 }
 
 function bucketFile(lat, lon) {

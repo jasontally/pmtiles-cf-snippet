@@ -157,7 +157,7 @@ for (const cell of cells) {
     const host = Math.floor(part / shardPartsPerShard);
     return `https://s.tiles${host}.jasontally.com/s/basemap/tile/${String(part).padStart(6, "0")}.bin`;
   });
-  const key = `${Math.floor(cell.lat / 10) * 10}:${Math.floor(cell.lon / 10) * 10}`;
+  const key = `${Math.floor(cell.lat / 10) * 10}_${Math.floor(cell.lon / 10) * 10}`;
   writeFileSync(join(outBase, `${encodeURIComponent(key)}.json`), JSON.stringify(urls));
   written++;
   console.log(`wrote ${written}: ${key} (${parts.size} parts)`);
