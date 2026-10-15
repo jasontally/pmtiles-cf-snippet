@@ -690,21 +690,25 @@ async function prepare() {
   step("split archive into asset files");
   const haveAssets = split(archive);
 
-  if (haveAssets) {
+  if (haveAssets && archive) {
     step("verify the asset files");
     verify(archive);
-    if (archive) {
-      step("generate root preload buckets");
-      run("node", [
-        join(ROOT, "tools", "generate-preloads.mjs"),
-        archive,
-        PUBLIC_DIR,
-        env("TILE_SHARD", "1000000"),
-        "5059",
-      ]);
-    }
+  } else if (haveAssets) {
+    console.log("\n=== no archive to verify against, skipping verify");
   } else {
     console.log("\n=== no asset tree, skipping verify");
+  }
+
+  if (!flag("SKIP_PRELOAD_GENERATOR", "0")) {
+    step("generate root preload buckets");
+    const generatorArgs = [
+      join(ROOT, "tools", "generate-preloads.mjs"),
+      "--out", PUBLIC_DIR,
+      "--tile-shard", env("TILE_SHARD", "1000000"),
+      "--parts", "5059",
+    ];
+    if (archive) generatorArgs.push("--archive", archive);
+    run("node", generatorArgs);
   }
 
   // wrangler refuses to deploy when the assets directory is missing, and the
