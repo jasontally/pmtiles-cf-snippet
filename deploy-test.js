@@ -608,11 +608,12 @@ await check("inlines the generated preload table and meta into the preload snipp
   const savedMeta = existsSync(metaPath) ? readFileSync(metaPath, "utf8") : null;
   try {
     mkdirSync(dirname(tablePath), { recursive: true });
-    writeFileSync(tablePath, "5059;8_13:12;16_11:6");
+    const entries = new Array(1024).fill("0");
+    entries[8 * 32 + 13] = "2s.14";
+    const table = `1;${entries.join(";")}`;
+    writeFileSync(tablePath, table);
     writeFileSync(metaPath, JSON.stringify({
       total: 126775469007,
-      tileOffset: 16384,
-      partSize: 1000000,
       ranges: [[0, 16384], [126450545781, 1160], [126450546941, 75360]],
     }));
     const run = await runBuild(CREDENTIALS, api.base, "deploy");
@@ -620,7 +621,7 @@ await check("inlines the generated preload table and meta into the preload snipp
     const upload = api.requests.find((r) => r.url === "/zones/zone123/snippets/preload");
     assert.ok(upload, "did not PUT the preload snippet");
     assert.ok(
-      upload.body.includes("5059;8_13:12;16_11:6"),
+      upload.body.includes(table),
       "the generated table must be in the uploaded code"
     );
     assert.ok(!upload.body.includes("__PRELOAD_TABLE__"), "the table marker must be replaced");

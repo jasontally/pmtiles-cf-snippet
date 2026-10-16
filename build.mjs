@@ -42,7 +42,7 @@
  *   SHARD_COUNT            number of shard Workers (default: 25)
  *   PRELOAD_ARCHIVE_URL    archive the preload table describes (default: the
  *                          URL this host serves, when SNIPPET_HOST is set)
- *   SKIP_PRELOAD_GENERATOR 1 to skip the preload table and buckets (default: 0)
+ *   SKIP_PRELOAD_GENERATOR 1 to skip the preload table (default: 0)
  *   DOWNLOAD               0 to never download (default: 1)
  *   SKIP_VERIFY            1 to skip the byte for byte check (default: 0)
  *   SKIP_ASSETS            1 to skip the asset upload (default: 0)
@@ -94,10 +94,6 @@ const MODULE_FILE = "snippet.js";
  * version in them.
  */
 const HEADERS_FILE =
-  "/preload/*\n" +
-  "\tCache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400\n" +
-  "\tCloudflare-CDN-Cache-Control: max-age=2592000\n" +
-  "\tAccess-Control-Allow-Origin: *\n" +
   "/s/*\n" +
   "\tCache-Control: public, max-age=2592000, s-maxage=2592000, stale-while-revalidate=86400\n" +
   "\tCloudflare-CDN-Cache-Control: max-age=2592000\n" +
@@ -619,10 +615,10 @@ function preloadRule() {
 /**
  * Put the generated table into the preload snippet.
  *
- * The table is one string written by tools/generate-preloads.mjs:
- * parts-per-shard, then one "key:parts" entry per zoom-five tile, separated by
- * semicolons. The snippet carries it so it needs no bucket request: a second
- * subrequest to the same zone fails in the Snippets runtime.
+ * The table is one string written by tools/generate-preloads.mjs: a format
+ * number, then one "offset.length" byte range per zoom-five tile in grid order,
+ * separated by semicolons. The snippet carries it so it needs no bucket request:
+ * a second subrequest to the same zone fails in the Snippets runtime.
  *
  * When the file is missing the marker stays in place and parses as an empty
  * table. The snippet still deploys, and injects nothing.
@@ -639,10 +635,13 @@ function inlinePreloadTable(source) {
     return source;
   }
   const table = readFileSync(path, "utf8").trim();
-  if (!/^\d+;/.test(table)) {
-    fail(`${path} does not start with a parts-per-shard count and a semicolon`);
+  if (!/^1;/.test(table)) {
+    fail(`${path} does not start with the table format number and a semicolon`);
   }
   const entries = table.slice(table.indexOf(";") + 1).split(";").length;
+  if (entries !== 1024) {
+    fail(`${path} holds ${entries} tile ranges, and the zoom-five grid is 1024 tiles`);
+  }
   console.log(`preload table ${Buffer.byteLength(table)} bytes, ${entries} entries`);
   return source.replace(marker, JSON.stringify(table));
 }
@@ -670,8 +669,6 @@ function inlinePreloadMeta(source) {
   const value = {
     url: `https://${host}/${env("ARCHIVE_NAME", "basemap")}.pmtiles`,
     total: meta.total,
-    tileOffset: meta.tileOffset,
-    partSize: meta.partSize,
     ranges: meta.ranges,
     links: preloadLinks(),
   };
@@ -875,14 +872,9 @@ async function prepare() {
   }
 
   if (!flag("SKIP_PRELOAD_GENERATOR", "0")) {
-    step("generate root preload buckets");
+    step("generate the root preload table");
     const generatorArgs = [
       join(ROOT, "tools", "generate-preloads.mjs"),
-      "--out", PUBLIC_DIR,
-      // The part size and count must match the snippet's ARCHIVES entry and the
-      // shard builds, or every part number in the table points at the wrong file.
-      "--tile-shard", env("TILE_SHARD", "1000000"),
-      "--shards", env("SHARD_COUNT", "25"),
       "--table", join(DIST_DIR, "preload-table.txt"),
       "--meta", join(DIST_DIR, "preload-meta.json"),
     ];

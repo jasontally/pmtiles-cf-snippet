@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 /**
- * Generate per-tile preload lists from a PMTiles archive.
+ * Generate the per-tile preload table from a PMTiles archive.
+ *
+ * The table holds one archive byte range per zoom-five tile, so the preload
+ * snippet can fetch the bytes the first map view draws instead of the whole
+ * megabyte part that holds them.
+ *
+ * The archive is read with range requests only: the header, the root directory
+ * and one leaf directory. A remote archive is never downloaded.
  */
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
@@ -21,20 +28,13 @@ function flag(name, fallback) {
   return at === -1 ? fallback : args[at + 1];
 }
 const args = process.argv.slice(2);
-const outDir = flag("--out", "public");
-const tileShard = Number(flag("--tile-shard", "1000000"));
-const shardCount = Number(flag("--shards", "25"));
-// Optional override. When it is absent the count is derived from the archive
-// header, so it cannot disagree with the shard build.
-const explicitParts = flag("--parts", "");
 const tablePath = flag("--table", "dist/preload-table.txt");
 const metaPath = flag("--meta", "dist/preload-meta.json");
-const limit = Number(flag("--limit", "Infinity"));
 const liveArchive = flag("--live-archive", "");
 let archivePath = flag("--archive", "");
 
 // The table has to describe the bytes the pmtiles snippet actually serves, or
-// every preload warms the wrong part. The shards' archive.json is not a
+// every preload warms the wrong span. The shards' archive.json is not a
 // reliable signal: each shard repo commits its own copy, and this repo only
 // holds the seed. So probe the served archive first. A build that has a local
 // archive uses that instead: it is about to publish those bytes.
@@ -129,19 +129,17 @@ const headerBytes = await getBytes(0, pm.HEADER_SIZE_BYTES || 127);
 const header = pm.bytesToHeader(headerBytes instanceof Uint8Array ? headerBytes.buffer : headerBytes, null);
 const rootDirectory = await directoryAt(header.rootDirectoryOffset, header.rootDirectoryLength);
 
-const tilePartCount = Math.ceil(header.tileDataLength / tileShard);
-const shardPartsPerShard = explicitParts
-  ? Number(explicitParts)
-  : Math.ceil(tilePartCount / shardCount);
-if (!Number.isInteger(shardPartsPerShard) || shardPartsPerShard <= 0) {
-  throw new Error(`bad shard size: ${shardPartsPerShard}`);
-}
-
 function findTile(entries, tileId) {
   return (pm.findTile ? pm.findTile(entries, tileId) : entries.find((e) => e.tileId <= tileId && tileId < e.tileId + e.runLength));
 }
 
-async function tilePartNumber(z, x, y) {
+// The first map view asks for a small window of zoom-five tiles: the viewer's
+// own tile plus at most one tile on each side, because the map opens centred on
+// the request coordinates. This resolves one tile's archive byte range, which is
+// what the preload snippet fetches instead of the whole megabyte part that holds
+// it. Reading the range costs nothing here: the leaf directory below is the one
+// the snippet already preloads, and it was read for the fixed ranges anyway.
+async function tileRange(z, x, y) {
   const tileId = pm.zxyToTileId(z, x, y);
   const rootEntry = findTile(rootDirectory, tileId);
   if (!rootEntry) return null;
@@ -149,33 +147,12 @@ async function tilePartNumber(z, x, y) {
   if (rootEntry.runLength === 0) {
     const leaf = await directoryAt(header.leafDirectoryOffset + rootEntry.offset, rootEntry.length);
     entry = findTile(leaf, tileId);
-    if (!entry || entry.runLength === 0) return null;
   }
-  return Math.floor(entry.offset / tileShard);
+  return entry && entry.runLength > 0 ? entry : null;
 }
 
-// The keys are the zoom-five tiles the first map view asks for. The map window
-// covers two tiles wide and at most three tall, and the viewer can sit anywhere
-// inside the keyed tile, so one tile of margin on each side covers every
-// position. preload-snippet.js builds the same key from the request
-// coordinates, and the two must stay in step or every preload warms nothing.
 const PRELOAD_ZOOM = 5;
-const PRELOAD_SPAN = 1;
 const PRELOAD_SIDE = 1 << PRELOAD_ZOOM;
-
-const outBase = join(outDir, "preload");
-// The key space follows the scheme above, so clear the last run. A stale bucket
-// would sit in the asset tree under a key the snippet can never build.
-rmSync(outBase, { recursive: true, force: true });
-mkdirSync(outBase, { recursive: true });
-
-let tiles = [];
-for (let x = 0; x < PRELOAD_SIDE; x++) {
-  for (let y = 0; y < PRELOAD_SIDE; y++) {
-    tiles.push({ x, y });
-  }
-}
-if (limit < tiles.length) tiles = tiles.slice(0, limit);
 
 // Three archive reads happen at the same offsets on every first view: the head,
 // which carries the header and the root directory; the JSON metadata the page
@@ -192,62 +169,54 @@ function fixedRanges() {
     [header.jsonMetadataOffset, header.jsonMetadataLength],
   ];
   let leaf = null;
-  for (const tile of tiles) {
-    const entry = findTile(rootDirectory, pm.zxyToTileId(PRELOAD_ZOOM, tile.x, tile.y));
-    if (!entry || entry.runLength !== 0) {
-      throw new Error(`zoom-five tile ${tile.x}_${tile.y} is not behind a leaf directory`);
-    }
-    const range = [header.leafDirectoryOffset + entry.offset, entry.length];
-    if (leaf === null) leaf = range;
-    else if (leaf[0] !== range[0] || leaf[1] !== range[1]) {
-      throw new Error("zoom-five tiles fall in more than one leaf directory");
+  for (let x = 0; x < PRELOAD_SIDE; x++) {
+    for (let y = 0; y < PRELOAD_SIDE; y++) {
+      const entry = findTile(rootDirectory, pm.zxyToTileId(PRELOAD_ZOOM, x, y));
+      if (!entry || entry.runLength !== 0) {
+        throw new Error(`zoom-five tile ${x}_${y} is not behind a leaf directory`);
+      }
+      const range = [header.leafDirectoryOffset + entry.offset, entry.length];
+      if (leaf === null) leaf = range;
+      else if (leaf[0] !== range[0] || leaf[1] !== range[1]) {
+        throw new Error("zoom-five tiles fall in more than one leaf directory");
+      }
     }
   }
   ranges.push(leaf);
   return ranges;
 }
 
+// One entry per zoom-five tile in grid order, index x * 32 + y. The entry is the
+// byte range of that tile's data in base 36: offset then length, absolute, so a
+// reader needs no running state to decode it. A missing tile is a bare "0", a
+// range no tile can have. The snippet reads nine of these per request, for the
+// window around the viewer.
 const tableRows = [];
-let written = 0;
-for (const tile of tiles) {
-  const parts = new Set();
-  for (let dx = -PRELOAD_SPAN; dx <= PRELOAD_SPAN; dx++) {
-    for (let dy = -PRELOAD_SPAN; dy <= PRELOAD_SPAN; dy++) {
-      const x = Math.max(0, Math.min(PRELOAD_SIDE - 1, tile.x + dx));
-      const y = Math.max(0, Math.min(PRELOAD_SIDE - 1, tile.y + dy));
-      const part = await tilePartNumber(PRELOAD_ZOOM, x, y);
-      if (part !== null) parts.add(part);
+let missing = 0;
+for (let x = 0; x < PRELOAD_SIDE; x++) {
+  for (let y = 0; y < PRELOAD_SIDE; y++) {
+    const entry = await tileRange(PRELOAD_ZOOM, x, y);
+    if (!entry) {
+      missing++;
+      tableRows.push("0");
+      continue;
     }
+    tableRows.push(`${(header.tileDataOffset + entry.offset).toString(36)}.${entry.length.toString(36)}`);
   }
-  if (!parts.size) continue;
-  const sorted = [...parts].sort((a, b) => a - b);
-  const urls = sorted.map((part) => {
-    const host = Math.floor(part / shardPartsPerShard);
-    return `https://s.tiles${host}.jasontally.com/s/basemap/tile/${String(part).padStart(6, "0")}.bin`;
-  });
-  const key = `${tile.x}_${tile.y}`;
-  writeFileSync(join(outBase, `${key}.json`), JSON.stringify(urls));
-  tableRows.push(`${key}:${sorted.join(",")}`);
-  written++;
-  console.log(`wrote ${written}: ${key} (${parts.size} parts)`);
 }
 
 mkdirSync(dirname(tablePath), { recursive: true });
-// Parts per shard goes first, then one "key:parts" entry per tile. The snippet
-// splits on semicolons and reads the count from the first chunk.
-writeFileSync(tablePath, `${shardPartsPerShard};${tableRows.join(";")}`);
-console.log(`wrote ${tableRows.length} table entries to ${tablePath}`);
+// The leading "1" is the table format. A snippet that meets anything else reads
+// no tile at all and preloads only the fixed ranges, which is the safe outcome
+// for a snippet deployed beside a table from another version.
+writeFileSync(tablePath, `1;${tableRows.join(";")}`);
+console.log(`wrote ${tableRows.length} tile ranges to ${tablePath} (${missing} tiles without data)`);
 
 mkdirSync(dirname(metaPath), { recursive: true });
 writeFileSync(metaPath, JSON.stringify({
-  // The archive size, for the Content-Range of a served range; the tile data
-  // offset and part size, to turn a part number into a byte span; and the fixed
+  // The archive size, for the Content-Range of a served range, and the fixed
   // ranges themselves.
   total: header.leafDirectoryOffset + header.leafDirectoryLength,
-  tileOffset: header.tileDataOffset,
-  partSize: tileShard,
   ranges: fixedRanges(),
 }));
 console.log(`wrote fixed ranges to ${metaPath}`);
-
-console.log(`wrote ${written} preload buckets to ${outBase}`);
