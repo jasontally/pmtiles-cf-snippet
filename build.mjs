@@ -666,43 +666,60 @@ function inlinePreloadMeta(source) {
   }
   const meta = JSON.parse(readFileSync(path, "utf8"));
   const host = env("SNIPPET_HOST", "tiles.example.com");
+  const found = defaultStyle();
+  const sprite = found && typeof found.style.sprite === "string" ? found.style.sprite : "";
   const value = {
     url: `https://${host}/${env("ARCHIVE_NAME", "basemap")}.pmtiles`,
     total: meta.total,
     ranges: meta.ranges,
-    links: preloadLinks(),
+    sprite,
+    links: preloadLinks(found),
   };
-  console.log(`preload meta: ${value.ranges.length} ranges, ${value.links.length} links`);
+  console.log(
+    `preload meta: ${value.ranges.length} ranges, ${sprite ? "1 sprite" : "no sprite"}, ${value.links.length} links`
+  );
   return source.replace(marker, JSON.stringify(JSON.stringify(value)));
 }
 
 /**
- * The static assets the root page asks for, in the order it reaches them: the
- * style modules that gate the boot, the default flavor, its sprite, and one
- * glyph range per font that flavor names. Read from the styles this build wrote,
- * so a style change moves the preloads with it. When a file is missing, the
- * list is shorter rather than wrong.
+ * The styles index, the default flavor in it, and that flavor's style file, read
+ * from what this build wrote. The link preloads and the sprite preload both need
+ * the default flavor, and one lookup keeps them from disagreeing about it.
  */
-function preloadLinks() {
+function defaultStyle() {
+  const indexPath = join(PUBLIC_DIR, "styles", "index.json");
+  if (!existsSync(indexPath)) return null;
+  const styles = JSON.parse(readFileSync(indexPath, "utf8"));
+  const flavors = Array.isArray(styles.flavors) ? styles.flavors : [];
+  const flavor = flavors.find((entry) => entry.id === styles.defaultFlavor) || flavors[0];
+  if (!flavor || typeof flavor.style !== "string") return null;
+  const stylePath = join(PUBLIC_DIR, flavor.style.replace(/^\//, ""));
+  if (!existsSync(stylePath)) return null;
+  return { styles, flavor, style: JSON.parse(readFileSync(stylePath, "utf8")) };
+}
+
+/**
+ * The static assets the root page asks for, in the order it reaches them: the
+ * style modules that gate the boot, the default flavor, and one glyph range per
+ * font that flavor names. Read from the styles this build wrote, so a style
+ * change moves the preloads with it. When a file is missing, the list is shorter
+ * rather than wrong.
+ *
+ * The sprite is not link-preloaded here. Its URL carries the pixel ratio, which
+ * only the page knows, so the injected script picks the variant and loads it the
+ * same way MapLibre does.
+ */
+function preloadLinks(found = defaultStyle()) {
   const links = [
     `<link rel="modulepreload" href="/styles/render-template.mjs">`,
     `<link rel="preload" as="fetch" href="/styles/index.json" crossorigin>`,
   ];
-  const indexPath = join(PUBLIC_DIR, "styles", "index.json");
-  if (!existsSync(indexPath)) {
-    console.log(`no ${indexPath}, the preload snippet lists only the style modules`);
+  if (!found) {
+    console.log("no default style under public/styles, only the style modules are preloaded");
     return links;
   }
-  const styles = JSON.parse(readFileSync(indexPath, "utf8"));
-  const flavors = Array.isArray(styles.flavors) ? styles.flavors : [];
-  const flavor = flavors.find((entry) => entry.id === styles.defaultFlavor) || flavors[0];
-  if (!flavor || typeof flavor.style !== "string") return links;
-  links.push(`<link rel="preload" as="fetch" href="${flavor.style}" crossorigin>`);
-  const stylePath = join(PUBLIC_DIR, flavor.style.replace(/^\//, ""));
-  if (!existsSync(stylePath)) return links;
-  const style = JSON.parse(readFileSync(stylePath, "utf8"));
-  // The sprite is deliberately not preloaded. MapLibre loads the sheet as an
-  // image, so a fetch preload is not reused and the sheet is downloaded twice.
+  links.push(`<link rel="preload" as="fetch" href="${found.flavor.style}" crossorigin>`);
+  const { styles, style } = found;
   const glyphs = typeof style.glyphs === "string"
     ? style.glyphs
     : typeof (styles.assets || {}).glyphs === "string" ? styles.assets.glyphs : "";

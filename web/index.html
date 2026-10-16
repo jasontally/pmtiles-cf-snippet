@@ -22,6 +22,12 @@
   can change with no change to the URL, so no integrity hash is possible against it
   and nobody can say what they loaded. Pinned plus integrity gives both.
 
+  A fetchpriority="high" hint on the library was measured twice and does nothing
+  here: on a throttled mobile profile the file still finished at 4.1s, both beside
+  the tile ranges and with the ranges delayed behind it. It is not in the tag for
+  that reason. What did move the map was deferring the injected preload script,
+  which is explained where that script is built.
+
   The fonts and sprites are a different answer and are served from here. See the
   Fonts and sprites section below for why.
 -->

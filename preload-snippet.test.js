@@ -34,9 +34,16 @@ const meta = parseMeta(JSON.stringify({
   total: 5000,
   ranges: [[0, 16], [900, 8]],
   links: ['<link rel="preload" as="fetch" href="/styles/index.json" crossorigin>'],
+  sprite: "https://tiles.example.com/sprites/v4/light",
 }));
 assert.ok(meta, "a complete meta blob parses");
 assert.deepEqual(meta.ranges, [[0, 16], [900, 8]], "the fixed ranges survive the parse");
+assert.equal(meta.sprite, "https://tiles.example.com/sprites/v4/light", "the sprite survives the parse");
+assert.equal(
+  parseMeta('{"url":"u","total":1,"ranges":[[0,8]]}').sprite,
+  "",
+  "meta without a sprite yields no sprite rather than a bad URL"
+);
 assert.equal(parseMeta("__PRELOAD_META__"), null, "an unreplaced marker is not meta");
 assert.equal(
   parseMeta('{"url":"u","total":1}'),
@@ -64,7 +71,11 @@ assert.ok(
   "the location tag carries the request coordinates"
 );
 assert.ok(injected.includes(meta.links[0]), "the asset links are injected");
-assert.ok(injected.includes("<script>("), "the preload script is injected");
+assert.ok(injected.includes(`"sprite":"${meta.sprite}"`), "the sprite reaches the script");
+assert.ok(
+  injected.includes('<script type="module">('),
+  "the preload script is injected as a module, so it defers instead of blocking the first paint"
+);
 assert.ok(
   !injected.includes(`<link rel="preload" as="fetch" href="${meta.url}"`),
   "the archive is not link-preloaded: a link cannot carry a byte range, so the script fetches the ranges"
@@ -103,11 +114,11 @@ assert.ok(
   "no coordinates means no centre to measure a window around"
 );
 assert.ok(
-  !headInjection(28.2061, -80.685, { meta: null, tiles }).includes("<script>"),
+  !headInjection(28.2061, -80.685, { meta: null, tiles }).includes("<script"),
   "no meta means no script"
 );
 assert.ok(
-  headInjection(28.2061, -80.685, { meta, tiles: null }).includes("<script>"),
+  headInjection(28.2061, -80.685, { meta, tiles: null }).includes('<script type="module">'),
   "a missing table still preloads the fixed ranges"
 );
 
@@ -223,6 +234,60 @@ assert.deepEqual(
   wideServed.filter((range) => !range.startsWith("bytes=0-") && !range.startsWith("bytes=900-")),
   ["bytes=500-519", "bytes=520-539", "bytes=540-559"],
   "a box the map reports widens the window to every tile it covers, and no tile outside it"
+);
+
+// The sprite is preloaded at the variant the map will ask for, with the kind of
+// request MapLibre makes, so its own load finds the bytes in the cache rather
+// than on the network.
+const spriteConfig = { ...config, sprite: "https://tiles.example.com/sprites/v4/light" };
+const spriteRequests = [];
+const images = [];
+class FakeImage {
+  set src(value) {
+    images.push({ src: value, crossOrigin: this.crossOrigin });
+  }
+}
+const runSprite = (devicePixelRatio) => {
+  const spritePage = {
+    fetch: (url) => {
+      spriteRequests.push(String(url));
+      return Promise.resolve(new Response("{}", { status: 200 }));
+    },
+    innerWidth: 4000,
+    innerHeight: 4000,
+    devicePixelRatio,
+  };
+  vm.runInContext(
+    `(${runtime})(${JSON.stringify(spriteConfig)})`,
+    vm.createContext({
+      window: spritePage,
+      Headers,
+      Response,
+      Image: FakeImage,
+      document: {
+        readyState: "complete",
+        getElementById: () => ({ getBoundingClientRect: () => ({ width: 512, height: 512 }) }),
+        addEventListener: () => {},
+      },
+      requestAnimationFrame: () => {},
+    })
+  );
+};
+runSprite(2);
+assert.deepEqual(
+  images,
+  [{ src: "https://tiles.example.com/sprites/v4/light@2x.png", crossOrigin: "anonymous" }],
+  "a device ratio above one preloads the 2x sheet the way MapLibre loads it"
+);
+assert.ok(
+  spriteRequests.includes("https://tiles.example.com/sprites/v4/light@2x.json"),
+  "the sprite index is preloaded too, so the sheet is not behind a round trip for it"
+);
+runSprite(1);
+assert.deepEqual(
+  images[1],
+  { src: "https://tiles.example.com/sprites/v4/light.png", crossOrigin: "anonymous" },
+  "a device ratio of one preloads the 1x sheet"
 );
 
 // Before the map's element is in the document there is nothing to measure, so

@@ -9,7 +9,8 @@
  * The table marker holds one archive byte range per zoom-five tile, in grid
  * order. The meta marker holds the archive's fixed ranges (the head, the
  * metadata, and the leaf directory the zoom-five tiles sit behind), the archive
- * URL, and the static assets the page asks for. build.mjs inlines both.
+ * URL, the sprite, and the static assets the page asks for. build.mjs inlines
+ * both.
  *
  * When a marker is not inlined it parses as nothing, so the snippet deploys and
  * injects less instead of failing.
@@ -69,11 +70,13 @@ export function parseMeta(text) {
     : [];
   if (!ranges.length || ranges.length !== value.ranges.length) return null;
   const links = Array.isArray(value.links) ? value.links.filter((link) => typeof link === "string") : [];
+  const sprite = typeof value.sprite === "string" && value.sprite ? value.sprite : "";
   return {
     url: value.url,
     total: value.total,
     ranges,
     links,
+    sprite,
   };
 }
 
@@ -136,6 +139,14 @@ export { bucket };
  * rendered at all, so retry on the next frame and once more at DOMContentLoaded.
  * One vector tile covers 512 CSS pixels at its own zoom, so the pixel span of
  * the box is what decides how many tiles the window holds.
+ *
+ * The style's sprite is fetched here as well, at the variant the map will ask
+ * for. MapLibre gets the sheet with an Image that sets crossOrigin "anonymous"
+ * and the index with a fetch, so these two calls copy that mode and its own
+ * loads find the bytes in the cache rather than on the network. The map's pixel
+ * ratio picks the variant, and the page clamps that ratio to 1.5, so it is above
+ * one exactly when the device ratio is. Bytes, not correctness, hang on the
+ * guess: the wrong variant still loads, the map fetches the other one.
  */
 export function runtime(config) {
   const net = window.fetch.bind(window);
@@ -152,6 +163,7 @@ export function runtime(config) {
     add(start, length, net(config.url, { headers: { Range: bytes(start, length) } }).then((r) => body(r, 206)));
   };
   for (const [start, length] of config.ranges) get(start, length);
+
 
   const wanted = new Map();
   for (const chunk of (config.tiles || "").split(",")) {
@@ -228,18 +240,44 @@ export function runtime(config) {
     }
     return net(input, init);
   };
+
+  // The style's sprite, at the variant the map will ask for. MapLibre gets the
+  // sheet with an Image that sets crossOrigin "anonymous" and the index with a
+  // fetch, so these two calls copy that mode and its own loads find the bytes in
+  // the cache rather than on the network. The map's pixel ratio picks the
+  // variant, and the page clamps that ratio to 1.5, so it is above one exactly
+  // when the device ratio is. Bytes, not correctness, hang on the guess: the
+  // wrong variant still loads, and the map fetches the other one.
+  //
+  // This runs last, after the wrapper above. Anything unexpected here then costs
+  // the page a warm sprite, not the wrapper that answers every range read.
+  if (config.sprite) {
+    const suffix = (window.devicePixelRatio || 1) > 1 ? "@2x" : "";
+    const sheet = new Image();
+    sheet.crossOrigin = "anonymous";
+    sheet.src = `${config.sprite}${suffix}.png`;
+    net(`${config.sprite}${suffix}.json`)
+      .then((response) => response.arrayBuffer())
+      .catch(() => null);
+  }
 }
 
 /**
  * The head of the root response: the visitor's coordinates, the assets the page
- * asks for next, the byte ranges of the nine tiles the first view can reach, and
- * the archive preload script. The coordinates come from request.cf, which is the
- * same coarse city the latlon service answers with, so the page needs no request
- * of its own for them.
+ * asks for next, the sprite, the byte ranges of the nine tiles the first view
+ * can reach, and the archive preload script. The coordinates come from
+ * request.cf, which is the same coarse city the latlon service answers with, so
+ * the page needs no request of its own for them.
  *
  * The nine tiles are the viewer's own and the ring around it. The script picks
  * the ones the map will draw out of them, so the page carries a few hundred
  * bytes rather than the whole table the snippet holds.
+ *
+ * The script is a module, which defers it. A classic inline script in the head
+ * stops the parser and the first paint of a page that has no use for these bytes
+ * yet. A module runs after the document is parsed and before DOMContentLoaded,
+ * so the fetch it wraps is still in place before the page's own module runs, and
+ * the map's box is in the document with its style applied when it measures.
  */
 export function headInjection(lat, lon, { meta = META, tiles = TILES } = {}) {
   const head = [];
@@ -267,12 +305,13 @@ export function headInjection(lat, lon, { meta = META, tiles = TILES } = {}) {
     url: meta.url,
     total: meta.total,
     ranges: meta.ranges,
+    sprite: meta.sprite || "",
     // Longitude first, the order MapLibre centres take.
     centre: Number.isFinite(lat) && Number.isFinite(lon) ? [lon, lat] : null,
     zoom: PRELOAD_ZOOM,
     tiles: group.join(","),
   };
-  head.push(`<script>(${runtime.toString()})(${JSON.stringify(config)})</script>`);
+  head.push(`<script type="module">(${runtime.toString()})(${JSON.stringify(config)})</script>`);
   return head.join("");
 }
 
