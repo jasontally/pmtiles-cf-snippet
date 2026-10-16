@@ -28,6 +28,7 @@ const shardCount = Number(flag("--shards", "25"));
 // header, so it cannot disagree with the shard build.
 const explicitParts = flag("--parts", "");
 const tablePath = flag("--table", "dist/preload-table.txt");
+const metaPath = flag("--meta", "dist/preload-meta.json");
 const limit = Number(flag("--limit", "Infinity"));
 const liveArchive = flag("--live-archive", "");
 let archivePath = flag("--archive", "");
@@ -176,6 +177,36 @@ for (let x = 0; x < PRELOAD_SIDE; x++) {
 }
 if (limit < tiles.length) tiles = tiles.slice(0, limit);
 
+// Three archive reads happen at the same offsets on every first view: the head,
+// which carries the header and the root directory; the JSON metadata the page
+// reads for its layer table; and one leaf directory, which the whole zoom-five
+// tile range falls into. preload-snippet.js carries them so the first view needs
+// no serial directory round trips. Every zoom-five tile has to share that one
+// leaf directory, so this fails the build rather than emit a range that only
+// some viewers would hit.
+const HEAD_LENGTH = 16384; // pmtiles 3.x reads getBytes(0, 16384) for header and root
+
+function fixedRanges() {
+  const ranges = [
+    [0, HEAD_LENGTH],
+    [header.jsonMetadataOffset, header.jsonMetadataLength],
+  ];
+  let leaf = null;
+  for (const tile of tiles) {
+    const entry = findTile(rootDirectory, pm.zxyToTileId(PRELOAD_ZOOM, tile.x, tile.y));
+    if (!entry || entry.runLength !== 0) {
+      throw new Error(`zoom-five tile ${tile.x}_${tile.y} is not behind a leaf directory`);
+    }
+    const range = [header.leafDirectoryOffset + entry.offset, entry.length];
+    if (leaf === null) leaf = range;
+    else if (leaf[0] !== range[0] || leaf[1] !== range[1]) {
+      throw new Error("zoom-five tiles fall in more than one leaf directory");
+    }
+  }
+  ranges.push(leaf);
+  return ranges;
+}
+
 const tableRows = [];
 let written = 0;
 for (const tile of tiles) {
@@ -206,5 +237,17 @@ mkdirSync(dirname(tablePath), { recursive: true });
 // splits on semicolons and reads the count from the first chunk.
 writeFileSync(tablePath, `${shardPartsPerShard};${tableRows.join(";")}`);
 console.log(`wrote ${tableRows.length} table entries to ${tablePath}`);
+
+mkdirSync(dirname(metaPath), { recursive: true });
+writeFileSync(metaPath, JSON.stringify({
+  // The archive size, for the Content-Range of a served range; the tile data
+  // offset and part size, to turn a part number into a byte span; and the fixed
+  // ranges themselves.
+  total: header.leafDirectoryOffset + header.leafDirectoryLength,
+  tileOffset: header.tileDataOffset,
+  partSize: tileShard,
+  ranges: fixedRanges(),
+}));
+console.log(`wrote fixed ranges to ${metaPath}`);
 
 console.log(`wrote ${written} preload buckets to ${outBase}`);

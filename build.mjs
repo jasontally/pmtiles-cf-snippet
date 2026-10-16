@@ -647,6 +647,85 @@ function inlinePreloadTable(source) {
   return source.replace(marker, JSON.stringify(table));
 }
 
+/**
+ * Build the second preload marker: the fixed archive ranges from
+ * dist/preload-meta.json, and the static assets the first view asks for, read
+ * from the styles this build wrote. The replacement is a JSON string, so the
+ * snippet parses it with the same "unusable marker parses as nothing" rule as
+ * the table.
+ */
+function inlinePreloadMeta(source) {
+  const marker = '"__PRELOAD_META__"';
+  if (!source.includes(marker)) {
+    console.log("preload snippet has no meta marker, leaving it alone");
+    return source;
+  }
+  const path = join(DIST_DIR, "preload-meta.json");
+  if (!existsSync(path)) {
+    console.log(`no ${path}, the preload snippet will inject no archive preload`);
+    return source;
+  }
+  const meta = JSON.parse(readFileSync(path, "utf8"));
+  const host = env("SNIPPET_HOST", "tiles.example.com");
+  const value = {
+    url: `https://${host}/${env("ARCHIVE_NAME", "basemap")}.pmtiles`,
+    total: meta.total,
+    tileOffset: meta.tileOffset,
+    partSize: meta.partSize,
+    ranges: meta.ranges,
+    links: preloadLinks(),
+  };
+  console.log(`preload meta: ${value.ranges.length} ranges, ${value.links.length} links`);
+  return source.replace(marker, JSON.stringify(JSON.stringify(value)));
+}
+
+/**
+ * The static assets the root page asks for, in the order it reaches them: the
+ * style modules that gate the boot, the default flavor, its sprite, and one
+ * glyph range per font that flavor names. Read from the styles this build wrote,
+ * so a style change moves the preloads with it. When a file is missing, the
+ * list is shorter rather than wrong.
+ */
+function preloadLinks() {
+  const links = [
+    `<link rel="modulepreload" href="/styles/render-template.mjs">`,
+    `<link rel="preload" as="fetch" href="/styles/index.json" crossorigin>`,
+  ];
+  const indexPath = join(PUBLIC_DIR, "styles", "index.json");
+  if (!existsSync(indexPath)) {
+    console.log(`no ${indexPath}, the preload snippet lists only the style modules`);
+    return links;
+  }
+  const styles = JSON.parse(readFileSync(indexPath, "utf8"));
+  const flavors = Array.isArray(styles.flavors) ? styles.flavors : [];
+  const flavor = flavors.find((entry) => entry.id === styles.defaultFlavor) || flavors[0];
+  if (!flavor || typeof flavor.style !== "string") return links;
+  links.push(`<link rel="preload" as="fetch" href="${flavor.style}" crossorigin>`);
+  const stylePath = join(PUBLIC_DIR, flavor.style.replace(/^\//, ""));
+  if (!existsSync(stylePath)) return links;
+  const style = JSON.parse(readFileSync(stylePath, "utf8"));
+  // The sprite is deliberately not preloaded. MapLibre loads the sheet as an
+  // image, so a fetch preload is not reused and the sheet is downloaded twice.
+  const glyphs = typeof style.glyphs === "string"
+    ? style.glyphs
+    : typeof (styles.assets || {}).glyphs === "string" ? styles.assets.glyphs : "";
+  if (!glyphs) return links;
+  const fonts = new Set();
+  for (const layer of style.layers || []) {
+    const stack = layer && layer.layout && layer.layout["text-font"];
+    if (Array.isArray(stack)) {
+      for (const font of stack) if (typeof font === "string") fonts.add(font);
+    }
+  }
+  for (const font of fonts) {
+    const url = glyphs
+      .replace("{fontstack}", encodeURIComponent(font))
+      .replace("{range}", "0-255");
+    if (url !== glyphs) links.push(`<link rel="preload" as="fetch" href="${url}" crossorigin>`);
+  }
+  return links;
+}
+
 function buildMultipartForm(small) {
   const form = new FormData();
   form.append("metadata", JSON.stringify({ main_module: "snippet.js" }));
@@ -698,7 +777,7 @@ async function deploySnippet() {
   const snippets = [];
   for (const spec of specs) {
     const source = readFileSync(spec.sourcePath, "utf8");
-    const prepared = spec.inlineTable ? inlinePreloadTable(source) : source;
+    const prepared = spec.inlineTable ? inlinePreloadMeta(inlinePreloadTable(source)) : source;
     const snippet = await minifySnippet(spec.sourcePath, spec.name, prepared);
     console.log(`snippet ${spec.name}: ${Buffer.byteLength(snippet)} bytes`);
     snippets.push({ ...spec, code: snippet });
@@ -805,6 +884,7 @@ async function prepare() {
       "--tile-shard", env("TILE_SHARD", "1000000"),
       "--shards", env("SHARD_COUNT", "25"),
       "--table", join(DIST_DIR, "preload-table.txt"),
+      "--meta", join(DIST_DIR, "preload-meta.json"),
     ];
     // An explicit archive is about to be published, so it is the right source.
     // Otherwise the table follows the archive the deployment serves, with the

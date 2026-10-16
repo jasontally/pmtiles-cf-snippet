@@ -600,13 +600,21 @@ await check("the sitemap names the served pages and robots.txt points at it", ()
   assert.ok(headers.includes("/sitemap.xml"), "the sitemap needs a cache rule");
 });
 
-await check("inlines the generated preload table into the preload snippet", async () => {
+await check("inlines the generated preload table and meta into the preload snippet", async () => {
   const api = await mockApi();
   const tablePath = join(dirname(BUILD), "dist", "preload-table.txt");
+  const metaPath = join(dirname(BUILD), "dist", "preload-meta.json");
   const saved = existsSync(tablePath) ? readFileSync(tablePath, "utf8") : null;
+  const savedMeta = existsSync(metaPath) ? readFileSync(metaPath, "utf8") : null;
   try {
     mkdirSync(dirname(tablePath), { recursive: true });
     writeFileSync(tablePath, "5059;8_13:12;16_11:6");
+    writeFileSync(metaPath, JSON.stringify({
+      total: 126775469007,
+      tileOffset: 16384,
+      partSize: 1000000,
+      ranges: [[0, 16384], [126450545781, 1160], [126450546941, 75360]],
+    }));
     const run = await runBuild(CREDENTIALS, api.base, "deploy");
     assert.equal(run.status, 0, `build failed:\n${run.stdout}\n${run.stderr}`);
     const upload = api.requests.find((r) => r.url === "/zones/zone123/snippets/preload");
@@ -615,10 +623,17 @@ await check("inlines the generated preload table into the preload snippet", asyn
       upload.body.includes("5059;8_13:12;16_11:6"),
       "the generated table must be in the uploaded code"
     );
-    assert.ok(!upload.body.includes("__PRELOAD_TABLE__"), "the marker must be replaced");
+    assert.ok(!upload.body.includes("__PRELOAD_TABLE__"), "the table marker must be replaced");
+    assert.ok(
+      upload.body.includes("126450546941"),
+      "the fixed ranges must be in the uploaded code"
+    );
+    assert.ok(!upload.body.includes("__PRELOAD_META__"), "the meta marker must be replaced");
   } finally {
     if (saved === null) rmSync(tablePath, { force: true });
     else writeFileSync(tablePath, saved);
+    if (savedMeta === null) rmSync(metaPath, { force: true });
+    else writeFileSync(metaPath, savedMeta);
     await api.close();
   }
 });

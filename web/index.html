@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Protomaps Basemap tiles — free, no API key</title>
 <meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee.">
+<link rel="icon" href="data:,">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
 <!--
   The two libraries, from jsDelivr, at a pinned version, with an integrity hash.
@@ -23,11 +25,14 @@
   The fonts and sprites are a different answer and are served from here. See the
   Fonts and sprites section below for why.
 -->
-<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"
-      integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous">
-<script src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"
+<link rel="preload" as="style" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"
+      integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous"
+      onload="this.rel='stylesheet'">
+<noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"
+      integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous"></noscript>
+<script defer src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"
         integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
-<script src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
+<script defer src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
         integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
 
 <style>
@@ -89,8 +94,8 @@
   }
   pre .c { color: var(--muted); }         /* comments */
   pre .s { color: var(--accent); }        /* strings */
-  pre .d { color: #b4623a; }              /* diff removed */
-  pre .a { color: #2f7d4f; }              /* diff added */
+  pre .d { color: #9c4726; }              /* diff removed */
+  pre .a { color: #26663d; }              /* diff added */
   @media (prefers-color-scheme: dark) { pre .d { color: #e0806a; } pre .a { color: #7fc99a; } }
 
   /* map */
@@ -208,7 +213,7 @@
 </style>
 </head>
 <body>
-<div class="wrap">
+<main class="wrap">
 
 <header class="hero">
   <h1>Protomaps Basemap tiles</h1>
@@ -719,7 +724,7 @@ console.log(tile.data.byteLength);</code></pre>
   PMTiles archive served from <span class="mono">tiles.jasontally.com</span>.
 </footer>
 
-</div>
+</main>
 
 <dialog id="style-dialog">
   <div class="dlg-head">
@@ -895,16 +900,25 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
    * Roughly where the visitor is, so the map opens on something they know rather
    * than on wherever the author happened to live.
    *
-   * latlon.jasontally.com answers with a latitude and a longitude and nothing
-   * else, and it sends CORS headers, so this needs no key and no third party.
-   * It is coarse: the answer is a city, not a building.
+   * The root page is rewritten with the location the edge already knows, so the
+   * usual load needs no request for this. The fallback asks
+   * latlon.jasontally.com, which answers with a latitude and a longitude and
+   * nothing else, and it sends CORS headers, so this needs no key and no third
+   * party. It is coarse: the answer is a city, not a building.
    *
-   * If it does not answer, or answers slowly, the map opens on the whole world
-   * instead. Waiting is capped, because a page that hangs on one small request
-   * to show a map is worse than a map of the world.
+   * If neither answers, or the fallback answers slowly, the map opens on the
+   * whole world instead. Waiting is capped, because a page that hangs on one
+   * small request to show a map is worse than a map of the world.
    */
   async function where() {
     const WORLD = { center: [0, 18], zoom: 2.4 };
+    const injected = document.querySelector('meta[name="tiles-latlon"]');
+    if (injected) {
+      const [lat, lon] = injected.content.split(",").map(Number);
+      if (Number.isFinite(lat) && Number.isFinite(lon) && Math.abs(lat) <= 90 && Math.abs(lon) <= 180) {
+        return { center: [lon, lat], zoom: 5 };
+      }
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2500);
     try {

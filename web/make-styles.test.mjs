@@ -576,7 +576,7 @@ await check("the libraries are pinned to a version with an integrity hash", asyn
   const tags = [...page.matchAll(
     /(?:href|src)="(https:\/\/cdn\.jsdelivr\.net\/npm\/[^"]+@([\d.]+)\/[^"]+)"\s*\n\s*integrity="([^"]+)"/g
   )];
-  assert.equal(tags.length, 3, `expected 3 pinned CDN tags, found ${tags.length}`);
+  assert.equal(tags.length, 4, `expected 4 pinned CDN tags, found ${tags.length}`);
   assert.ok(!/@\d+\/dist\//.test(page.replace(/@[\d.]+\//g, "@")), "a tag uses a floating version");
   for (const [, url, version, integrity] of tags) {
     const response = await fetch(url);
