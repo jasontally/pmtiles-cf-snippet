@@ -987,18 +987,17 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     // The builder must open on the same flavour the map is showing, or the map
     // would change style behind the visitor as the page finishes loading.
     setFlavorPalette(current.id);
+    // The map draws the file this build wrote for this flavour, and the build
+    // wrote that file by rendering this template with this palette, so the style
+    // in hand is already the style on screen: the first apply() then pushes only
+    // real differences. Handing MapLibre a new style instead makes it drop its
+    // tiles, fetch the sprite a second time, and draw its first frame twice before
+    // the first one a visitor sees. The test that holds every shipped flavour
+    // equal to its render is what makes this true, and reading the file back would
+    // cost a round trip to learn the same thing. This runs before applyHash, so
+    // what a shared link holds is still a difference to push.
+    appliedStyle = currentStyle();
     applyHash();
-    // The map is built from the shipped file for this flavour, so naming that file
-    // as the style in hand lets the first apply() push only real differences.
-    // Handing MapLibre a new style instead makes it drop its tiles, fetch the sprite
-    // a second time, and draw its first frame twice before the first one a visitor
-    // sees. Without the file there is nothing to compare against, so fall back to
-    // the full style change.
-    try {
-      appliedStyle = await (await fetch(current.url)).json();
-    } catch {
-      appliedStyle = null;
-    }
     apply();
   }
 
