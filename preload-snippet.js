@@ -195,9 +195,15 @@ export function headInjection(lat, lon, { meta = META, partsPerShard = PARTS_PER
     head.push(`<meta name="tiles-latlon" content="${lat.toFixed(4)},${lon.toFixed(4)}">`);
   }
   if (!meta) return head.join("");
-  head.push(...meta.links);
   const key = bucket(lat, lon);
   const parts = ((key && buckets.get(key)) || []).map((part) => [part, partUrl(part, partsPerShard)]);
+  // The parts are served from another host. Open those connections first, while
+  // the parser is still at the top of the head, so the handshake is not waiting
+  // in front of the bytes the first view needs.
+  for (const origin of new Set(parts.map(([, url]) => new URL(url).origin))) {
+    head.push(`<link rel="preconnect" href="${origin}" crossorigin>`);
+  }
+  head.push(...meta.links);
   if (!parts.length) return head.join("");
   // The part links start the part fetches while the parser is still in the head,
   // and the script below reads the same URLs back from the browser cache, so the

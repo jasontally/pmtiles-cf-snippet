@@ -74,6 +74,20 @@ assert.ok(
   injected.includes("https://s.tiles0.jasontally.com/s/basemap/tile/000012.bin"),
   "the part URL matches the scheme the table uses"
 );
+assert.ok(
+  injected.includes('<link rel="preconnect" href="https://s.tiles0.jasontally.com" crossorigin>'),
+  "the part host is connected before its parts are asked for"
+);
+assert.ok(
+  injected.indexOf('rel="preconnect"') < injected.indexOf('rel="preload"'),
+  "the preconnect comes before every preload"
+);
+const twoHosts = headInjection(28.2061, -80.685, { meta, partsPerShard: 5059, buckets: new Map([["8_13", [12, 5071]]]) });
+assert.equal(
+  twoHosts.match(/rel="preconnect"/g).length,
+  2,
+  "one connection per host, however many parts come from it"
+);
 assert.ok(injected.includes("<script>("), "the preload script is injected");
 assert.ok(
   !headInjection(NaN, 0, { meta, partsPerShard: 5059, buckets }).includes("tiles-latlon"),

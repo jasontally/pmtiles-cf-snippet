@@ -1058,5 +1058,18 @@ await check("the dark palette spends its contrast on the thin things", async () 
     "the land has no edge outline, so land and water merge");
 });
 
+await check("each shipped flavour is its own template render", () => {
+  // The page draws the map from the shipped file and then diffs the template
+  // render against it, instead of rebuilding the style and drawing it twice. That
+  // is only free while the two are one style: if they drift, the map keeps showing
+  // the shipped file and the builder hands over something else.
+  const builder = readBuilder();
+  for (const id of ids) {
+    const shipped = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", `${id}.json`), "utf8"));
+    const rendered = renderTemplate(builder.template, { ...builder.palettes[id], flavor: id }, {});
+    assert.deepEqual(rendered, shipped, `${id}.json is not what the builder renders for ${id}`);
+  }
+});
+
 console.log(`${passed} passed, ${failed} failed`);
 process.exit(failed === 0 ? 0 : 1);
