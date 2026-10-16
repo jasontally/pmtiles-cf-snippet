@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * Generate per-location preload lists from a PMTiles archive.
+ * Generate per-tile preload lists from a PMTiles archive.
  */
 import { createRequire } from "node:module";
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { gunzipSync } from "node:zlib";
@@ -153,37 +153,38 @@ async function tilePartNumber(z, x, y) {
   return Math.floor(entry.offset / tileShard);
 }
 
-function latLonToTile(lat, lon, zoom) {
-  const n = 1 << zoom;
-  const x = Math.floor((lon + 180) / 360 * n);
-  const latRad = lat * Math.PI / 180;
-  const y = Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * n);
-  return { x: Math.max(0, Math.min(n - 1, x)), y: Math.max(0, Math.min(n - 1, y)), z: zoom };
-}
+// The keys are the zoom-five tiles the first map view asks for. The map window
+// covers two tiles wide and at most three tall, and the viewer can sit anywhere
+// inside the keyed tile, so one tile of margin on each side covers every
+// position. preload-snippet.js builds the same key from the request
+// coordinates, and the two must stay in step or every preload warms nothing.
+const PRELOAD_ZOOM = 5;
+const PRELOAD_SPAN = 1;
+const PRELOAD_SIDE = 1 << PRELOAD_ZOOM;
 
 const outBase = join(outDir, "preload");
+// The key space follows the scheme above, so clear the last run. A stale bucket
+// would sit in the asset tree under a key the snippet can never build.
+rmSync(outBase, { recursive: true, force: true });
 mkdirSync(outBase, { recursive: true });
 
-let cells = [];
-for (let lat = -90; lat < 90; lat += 10) {
-  for (let lon = -180; lon < 180; lon += 10) {
-    cells.push({ lat, lon });
+let tiles = [];
+for (let x = 0; x < PRELOAD_SIDE; x++) {
+  for (let y = 0; y < PRELOAD_SIDE; y++) {
+    tiles.push({ x, y });
   }
 }
-if (limit < cells.length) cells = cells.slice(0, limit);
+if (limit < tiles.length) tiles = tiles.slice(0, limit);
 
 const tableRows = [];
 let written = 0;
-for (const cell of cells) {
-  const centerLat = cell.lat + 5;
-  const centerLon = cell.lon + 5;
-  const tile = latLonToTile(centerLat, centerLon, 5);
+for (const tile of tiles) {
   const parts = new Set();
-  for (let dx = -2; dx <= 2; dx++) {
-    for (let dy = -2; dy <= 2; dy++) {
-      const x = Math.max(0, Math.min((1 << tile.z) - 1, tile.x + dx));
-      const y = Math.max(0, Math.min((1 << tile.z) - 1, tile.y + dy));
-      const part = await tilePartNumber(tile.z, x, y);
+  for (let dx = -PRELOAD_SPAN; dx <= PRELOAD_SPAN; dx++) {
+    for (let dy = -PRELOAD_SPAN; dy <= PRELOAD_SPAN; dy++) {
+      const x = Math.max(0, Math.min(PRELOAD_SIDE - 1, tile.x + dx));
+      const y = Math.max(0, Math.min(PRELOAD_SIDE - 1, tile.y + dy));
+      const part = await tilePartNumber(PRELOAD_ZOOM, x, y);
       if (part !== null) parts.add(part);
     }
   }
@@ -193,15 +194,15 @@ for (const cell of cells) {
     const host = Math.floor(part / shardPartsPerShard);
     return `https://s.tiles${host}.jasontally.com/s/basemap/tile/${String(part).padStart(6, "0")}.bin`;
   });
-  const key = `${Math.floor(cell.lat / 10) * 10}_${Math.floor(cell.lon / 10) * 10}`;
-  writeFileSync(join(outBase, `${encodeURIComponent(key)}.json`), JSON.stringify(urls));
+  const key = `${tile.x}_${tile.y}`;
+  writeFileSync(join(outBase, `${key}.json`), JSON.stringify(urls));
   tableRows.push(`${key}:${sorted.join(",")}`);
   written++;
   console.log(`wrote ${written}: ${key} (${parts.size} parts)`);
 }
 
 mkdirSync(dirname(tablePath), { recursive: true });
-// Parts per shard goes first, then one "key:parts" entry per cell. The snippet
+// Parts per shard goes first, then one "key:parts" entry per tile. The snippet
 // splits on semicolons and reads the count from the first chunk.
 writeFileSync(tablePath, `${shardPartsPerShard};${tableRows.join(";")}`);
 console.log(`wrote ${tableRows.length} table entries to ${tablePath}`);

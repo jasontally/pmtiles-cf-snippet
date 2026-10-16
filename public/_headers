@@ -22,3 +22,7 @@
 /styles/*
 	Cache-Control: public, max-age=604800
 	Access-Control-Allow-Origin: *
+/robots.txt
+	Cache-Control: public, max-age=86400
+/sitemap.xml
+	Cache-Control: public, max-age=86400

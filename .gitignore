@@ -1,8 +1,11 @@
 # The asset tree: 65,259 part files and 118 GiB. Never commit those. The
 # _headers file is committed so the public directory always exists, because
-# wrangler refuses to deploy when the assets directory is missing.
+# wrangler refuses to deploy when the assets directory is missing. robots.txt
+# and sitemap.xml have no generator, so they are committed too.
 public/*
 !public/_headers
+!public/robots.txt
+!public/sitemap.xml
 
 # The minified snippet, written by the build.
 dist/

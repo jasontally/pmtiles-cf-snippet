@@ -580,19 +580,39 @@ await check("public/_headers is committed so the assets directory exists", () =>
   );
 });
 
+await check("the sitemap names the served pages and robots.txt points at it", () => {
+  // Both files have no generator, so a build that loses them loses the crawl
+  // hints. The map root and the styles page are the only HTML pages.
+  const root = join(dirname(BUILD), "public");
+  const sitemap = readFileSync(join(root, "sitemap.xml"), "utf8");
+  const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
+  assert.deepEqual(locs, [
+    "https://tiles.jasontally.com/",
+    "https://tiles.jasontally.com/styles/",
+  ]);
+  const robots = readFileSync(join(root, "robots.txt"), "utf8");
+  assert.ok(
+    robots.includes("Sitemap: https://tiles.jasontally.com/sitemap.xml"),
+    "robots.txt must advertise the sitemap"
+  );
+  assert.ok(robots.includes("Disallow: /s/"), "the part files stay out of the crawl");
+  const headers = readFileSync(join(root, "_headers"), "utf8");
+  assert.ok(headers.includes("/sitemap.xml"), "the sitemap needs a cache rule");
+});
+
 await check("inlines the generated preload table into the preload snippet", async () => {
   const api = await mockApi();
   const tablePath = join(dirname(BUILD), "dist", "preload-table.txt");
   const saved = existsSync(tablePath) ? readFileSync(tablePath, "utf8") : null;
   try {
     mkdirSync(dirname(tablePath), { recursive: true });
-    writeFileSync(tablePath, "5059;20_-90:6,7,8;40_0:6");
+    writeFileSync(tablePath, "5059;8_13:12;16_11:6");
     const run = await runBuild(CREDENTIALS, api.base, "deploy");
     assert.equal(run.status, 0, `build failed:\n${run.stdout}\n${run.stderr}`);
     const upload = api.requests.find((r) => r.url === "/zones/zone123/snippets/preload");
     assert.ok(upload, "did not PUT the preload snippet");
     assert.ok(
-      upload.body.includes("5059;20_-90:6,7,8;40_0:6"),
+      upload.body.includes("5059;8_13:12;16_11:6"),
       "the generated table must be in the uploaded code"
     );
     assert.ok(!upload.body.includes("__PRELOAD_TABLE__"), "the marker must be replaced");

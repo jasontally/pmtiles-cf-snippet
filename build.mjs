@@ -117,7 +117,13 @@ const HEADERS_FILE =
   "\tAccess-Control-Allow-Origin: *\n" +
   "/styles/*\n" +
   "\tCache-Control: public, max-age=604800\n" +
-  "\tAccess-Control-Allow-Origin: *\n";
+  "\tAccess-Control-Allow-Origin: *\n" +
+  // Search engines refetch these on their own schedule, so a day is enough and
+  // a change reaches them the same day.
+  "/robots.txt\n" +
+  "\tCache-Control: public, max-age=86400\n" +
+  "/sitemap.xml\n" +
+  "\tCache-Control: public, max-age=86400\n";
 
 const env = (key, fallback) => {
   const value = process.env[key];
@@ -614,7 +620,7 @@ function preloadRule() {
  * Put the generated table into the preload snippet.
  *
  * The table is one string written by tools/generate-preloads.mjs:
- * parts-per-shard, then one "key:parts" entry per ten-degree cell, separated by
+ * parts-per-shard, then one "key:parts" entry per zoom-five tile, separated by
  * semicolons. The snippet carries it so it needs no bucket request: a second
  * subrequest to the same zone fails in the Snippets runtime.
  *
@@ -636,8 +642,8 @@ function inlinePreloadTable(source) {
   if (!/^\d+;/.test(table)) {
     fail(`${path} does not start with a parts-per-shard count and a semicolon`);
   }
-  const cells = table.slice(table.indexOf(";") + 1).split(";").length;
-  console.log(`preload table ${Buffer.byteLength(table)} bytes, ${cells} cells`);
+  const entries = table.slice(table.indexOf(";") + 1).split(";").length;
+  console.log(`preload table ${Buffer.byteLength(table)} bytes, ${entries} entries`);
   return source.replace(marker, JSON.stringify(table));
 }
 

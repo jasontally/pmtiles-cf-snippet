@@ -1,0 +1,7 @@
+User-Agent: *
+Allow: /
+Disallow: /preload/
+Disallow: /s/
+Disallow: /*.pmtiles
+
+Sitemap: https://tiles.jasontally.com/sitemap.xml

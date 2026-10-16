@@ -2,8 +2,8 @@
  * Optional root-page snippet: inject preload tags for the first map view.
  *
  * The table below is generated at build time from the archive layout and
- * inlined by build.mjs. The snippet reads one entry for the viewer's ten-degree
- * cell and emits one preload link per tile part.
+ * inlined by build.mjs. The snippet reads one entry for the viewer's zoom-five
+ * tile and emits one preload link per tile part.
  *
  * The table is carried in the code on purpose. A second subrequest to the same
  * zone fails in the Snippets runtime, so the origin fetch below spends the one
@@ -35,11 +35,26 @@ export function parseTable(text) {
 
 const { partsPerShard: PARTS_PER_SHARD, buckets: BUCKETS } = parseTable(TABLE);
 
+// The keys are zoom-five tiles, the same keys tools/generate-preloads.mjs
+// writes. The first map view asks for two tiles wide and up to three tall, and
+// the generated table carries one tile of margin on each side, so the viewer's
+// own tile is the only key this snippet needs to build.
+const PRELOAD_ZOOM = 5;
+const PRELOAD_SIDE = 1 << PRELOAD_ZOOM;
+// Latitude clamps at the Mercator limit. A viewer at the pole still lands on
+// the top row instead of a NaN key.
+const MERCATOR_LAT = 85.051129;
+
 function bucket(lat, lon) {
   if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
   if (Math.abs(lat) > 90 || Math.abs(lon) > 180) return null;
-  // Ten-degree cells, kept coarse so the generated table stays small.
-  return `${Math.floor(lat / 10) * 10}_${Math.floor(lon / 10) * 10}`;
+  const x = Math.min(PRELOAD_SIDE - 1, Math.max(0, Math.floor((lon + 180) / 360 * PRELOAD_SIDE)));
+  const latRad = Math.max(-MERCATOR_LAT, Math.min(MERCATOR_LAT, lat)) * Math.PI / 180;
+  const y = Math.min(
+    PRELOAD_SIDE - 1,
+    Math.max(0, Math.floor((1 - Math.log(Math.tan(latRad) + 1 / Math.cos(latRad)) / Math.PI) / 2 * PRELOAD_SIDE))
+  );
+  return `${x}_${y}`;
 }
 
 function bucketFile(lat, lon) {
