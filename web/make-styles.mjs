@@ -1219,10 +1219,9 @@ function main() {
       sprite: SPRITES,
       fonts: ["Noto Sans Regular", "Noto Sans Medium"],
       sprites: ["light", "dark", "grayscale", "black", "white"],
-      // The libraries, published here as well as on jsDelivr. The page loads the
-      // library from here, as a body compressed at build time that the host
-      // declares the encoding of, and the other two from jsDelivr, which measures
-      // faster for a file that small. See asset-hosting.md.
+      // The libraries, published here as well as on jsDelivr. The page itself loads
+      // them from jsDelivr because that measured faster; these are here so a
+      // developer can serve a whole map from one hostname.
       libraries: [
         { name: "MapLibre GL JS", version: "5.24.0", path: "/vendor/maplibre-gl.js", licence: "BSD-3-Clause" },
         { name: "MapLibre GL CSS", version: "5.24.0", path: "/vendor/maplibre-gl.css", licence: "BSD-3-Clause" },

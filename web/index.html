@@ -9,21 +9,21 @@
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
 <!--
-  Two libraries from jsDelivr and one from this host, at a pinned version, each
-  with an integrity hash.
+  The two libraries, from jsDelivr, at a pinned version, with an integrity hash.
 
-  All three used to be on jsDelivr. The library moved here because this host can
-  send a body compressed once at build time and the CDN cannot beat it: brotli at
-  its best writes MapLibre in 224,810 bytes where jsDelivr serves 276,601, and
-  50 KB is 0.26 s on the mobile profile the project measures against, where the
-  CDN's advantage is 35 ms of first byte. The copy is /vendor/maplibre-gl.js.br,
-  the file with ".br" after it because that is what it is: a brotli stream, which
-  only a client that reads it as one can run. public/_headers declares it, and the
-  digest below is of the body the browser ends up with, so it is the same digest
-  the CDN copy carries. The other two stay on the CDN: 9,452 bytes against 8,167
-  for the CSS and 13,272 against 11,087 for PMTiles JS is under 3 KB either way,
-  less than the round trip the move would cost. asset-hosting.md is the record and
-  tools/bench-assets.mjs is the measurement.
+  They were vendored here and served from this host first. Measuring the two
+  against each other, three times, said jsDelivr is between 1.15 and 1.67 times
+  faster on a warm request, so they stayed on the CDN. tools/bench-assets.mjs is
+  that measurement, and re-running it is one command, so this is a decision with a
+  number behind it rather than a habit. If you would rather have one hostname and
+  no third party, point these three at this host instead; the files are the same.
+
+  Serving MapLibre from here with brotli applied once at build time was tried and
+  moved back. This host compresses the file it stores with its own coding and
+  ignores the Content-Encoding line in public/_headers, so the browser decoded one
+  layer, found a brotli stream where it wanted script, refused it on the digest,
+  and the map waited for a second copy from the CDN. asset-hosting.md has the
+  measurements.
 
   What did change is the version. A floating @5 or @3 means the bytes under a URL
   can change with no change to the URL, so no integrity hash is possible against it
@@ -43,7 +43,7 @@
       onload="this.rel='stylesheet'">
 <noscript><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css"
       integrity="sha384-uTttxo/aOKbdE5RlD/SPzSDoDmNvGlUYPjONi2MN/b7c9HPSvW07OIuyP7uL6jxK" crossorigin="anonymous"></noscript>
-<script defer src="/vendor/maplibre-gl.js.br"
+<script defer src="https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"
         integrity="sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp" crossorigin="anonymous"></script>
 <script defer src="https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js"
         integrity="sha384-QfbOCebHNw8pQiPAOd2IFee2v2A5VYZxBk0+JGZ5H+3mfzVIp6zsQNkTsfGJot93" crossorigin="anonymous"></script>
@@ -448,15 +448,10 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
     </table>
   </div>
   <p>
-    The three files are here and are also on jsDelivr, at the same pinned version,
-    so swapping one for the other is a URL change and nothing else. This page loads
-    the CSS and the PMTiles library from jsDelivr, because for a file that small the
-    CDN's first byte beats anything this host can offer. It loads MapLibre from
-    here, at <code>/vendor/maplibre-gl.js.br</code>: the same file with brotli
-    applied once at build time and the encoding declared in the response, 224,810
-    bytes against the CDN's 276,601, which no host compresses as hard on the fly.
-    If you copy that URL, copy the header with it, or you are handing the browser a
-    brotli stream and no word that it is one.
+    The two libraries are here and are also on jsDelivr. This page loads them from
+    jsDelivr, because that measured faster; the copies here are so that you can use
+    one hostname if you prefer. Both are the same files, pinned to the same version,
+    so swapping is a URL change and nothing else.
   </p>
   <p>
     Two font stacks, <code>Noto Sans Regular</code> and <code>Noto Sans Medium</code>,
@@ -756,24 +751,6 @@ console.log(tile.data.byteLength);</code></pre>
 
 <script type="module">
 import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/render-template.mjs";
-
-// The library comes from this host as a body compressed at build time, and that
-// only works while the response says so with a Content-Encoding header. If the
-// header ever goes missing, the browser refuses the script on the integrity check
-// and the map is empty rather than late. So take the CDN copy instead of drawing
-// nothing: one round trip on a bad day against a blank map every day. It stays
-// here until the live host has been seen sending that header.
-if (typeof maplibregl === "undefined") {
-  await new Promise((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js";
-    script.integrity = "sha384-5+cfbwT0iiub6VsQAdn6yz16nr6sDiQoHx6tm4O8OVYXHYOxcffFmCJBL0dgdvGp";
-    script.crossOrigin = "anonymous";
-    script.onload = resolve;
-    script.onerror = reject;
-    document.head.appendChild(script);
-  });
-}
 
 (function () {
   "use strict";

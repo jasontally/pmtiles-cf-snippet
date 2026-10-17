@@ -20,7 +20,7 @@ It reads. It deploys nothing and changes nothing.
 |---|---|---|
 | Glyph ranges | `/font/{fontstack}/{range}.pbf` | SIL OFL 1.1, at `/font/OFL.txt` |
 | Sprite sheets | `/sprites/v4/{flavour}` | MIT, at `/sprites/LICENSE.md` |
-| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.js.br`, `/vendor/maplibre-gl.css` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
+| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.css`, and the probe `/vendor/maplibre-gl.js.br` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
 | PMTiles 3.2.1 | `/vendor/pmtiles.js` | BSD-3-Clause, at `/vendor/pmtiles-LICENSE.txt` |
 
 All four licences permit redistribution, and all four are published next to the
@@ -38,15 +38,12 @@ the one thing worth having.
 | Tiles | here | It is the whole point |
 | Glyph ranges | here | One hostname, and this host caches them for a year against upstream's ten minutes |
 | Sprite sheets | here | Same, and these styles draw no icons so nothing is fetched unless you add an icon layer |
-| MapLibre GL JS | here | 224,810 bytes against the CDN's 276,601. The 50 KB is 0.26 s at 1.6 Mbit/s, where the CDN's advantage is 35 ms |
-| MapLibre GL CSS, PMTiles | jsDelivr | 1.3 KB and 2.2 KB of compression against a round trip of about 35 ms, so the CDN |
+| MapLibre GL, PMTiles | jsDelivr | jsDelivr is 1.3 to 2.8 times faster on time to first byte |
 
-The CSS and the PMTiles library are here as well as on jsDelivr, and the page takes
-the CDN's. A developer who wants a map from one hostname, or who does not want to
+The copies of the libraries exist and are documented even though the page does not
+use them. A developer who wants a map from one hostname, or who does not want to
 tell a CDN the address of every visitor, can have that, and saying "ours is slower"
-is only believable if ours exists. MapLibre GL JS is the exception and the numbers
-above are why: what is slower by 35 ms is also 50 KB heavier, and 50 KB is seven
-times the 35 ms.
+is only believable if ours exists.
 
 ## The measurement, and how it nearly went wrong
 
@@ -101,7 +98,7 @@ whole project is about. If that trade is the wrong way round, pointing `glyphs` 
 `protomaps.github.io` is a one-line change in `web/make-styles.mjs` and the fonts
 are already there.
 
-### The half of it the first byte does not decide
+### A body compressed at the build, and why it is not here
 
 First byte is not the whole cost. The bytes after it are, on the profile this
 project measures against: 1.6 Mbit/s, one second per 200 KB. So the size of the body
@@ -111,21 +108,17 @@ question is not which host is faster but what each one puts on the wire.
 
 Measured 2026-10-16, one `curl -H 'Accept-Encoding: br'` per URL:
 
-| Asset | This host | jsDelivr | Brotli at its best | Verdict |
-|---|---|---|---|---|
-| MapLibre GL JS | 274,643 | 276,601 | 224,810 | here, 50 KB is 0.26 s |
-| MapLibre GL CSS | 9,472 | 9,452 | 8,167 | jsDelivr, 1.3 KB is 6 ms |
-| PMTiles JS | 13,312 | 13,272 | 11,087 | jsDelivr, 2.2 KB is 11 ms |
+| Asset | This host | jsDelivr | Brotli at its best |
+|---|---|---|---|
+| MapLibre GL JS | 274,643 | 276,601 | 224,810 |
+| MapLibre GL CSS | 9,472 | 9,452 | 8,167 |
+| PMTiles JS | 13,312 | 13,272 | 11,087 |
 
-The column that matters is the last: 50 KB against 35 ms of first byte is a clear
-win, and 1.3 KB against 35 ms is a clear loss. So the library moved and the other
-two did not. This host's own compression is gzip-class everywhere: it sends the
-style JSON as 3,410 bytes where brotli at its best writes 2,638, and there is no way
-to ask it for more.
-
-A pre-compressed body is the only way past that level, and it has to be declared, or
-the browser runs the compressed bytes. `build.mjs` writes
-`public/vendor/maplibre-gl.js.br`, and `public/_headers` says what it is:
+That last column is why MapLibre looked like the one asset worth moving: 50 KB
+against 35 ms of first byte, where the other two are 1.3 KB and 2.2 KB against the
+same 35 ms, which is less than the round trip. So the library moved on 2026-10-17,
+as a body brotli-compressed once at quality 11 by `build.mjs`, with `public/_headers`
+declaring what it is:
 
 ```
 /vendor/maplibre-gl.js.br
@@ -133,30 +126,70 @@ the browser runs the compressed bytes. `build.mjs` writes
 	Content-Encoding: br
 ```
 
-Both lines are load-bearing. Without the first the response is
-`application/octet-stream` and a browser refuses to run it as a script; without the
-second the whole file is a syntax error. A deploy can therefore make the map
-disappear, which is why the page keeps a fallback to the CDN copy, and why
-`web/make-styles.test.mjs` unpacks the file the build wrote and compares it with the
-vendored library, and recomputes the digest the tag carries. The digest is of the
-body the browser ends up with, so it is the same digest the CDN copy has.
+It does not work on this host, and that deploy is the measurement. The host
+compresses the file it stores with its own coding and ignores the line that declares
+otherwise, so every client receives one layer more than it can use:
 
-One thing local tools cannot check. `wrangler dev` answers the request with its own
-gzip on top of the declared encoding, so a browser receives a gzip stream full of
-brotli, fails the digest and falls back to the CDN. The asset worker has no
-compression code of its own, so that gzip is the dev proxy rather than the platform,
-and the deployed host is what has to be checked:
+| `Accept-Encoding` sent | Response says | Body | Usable |
+|---|---|---|---|
+| `gzip, deflate, br, zstd` | `Content-Encoding: br` | brotli of our brotli, 224,815 bytes | no |
+| `gzip, deflate` | `Content-Encoding: gzip` | gzip of our brotli, 224,995 bytes | no |
+| nothing | no encoding line | our brotli, 224,810 bytes | no |
+
+The browser refused the script on the digest it had been given: `Failed to find a
+valid digest in the 'integrity' attribute for resource
+'https://tiles.jasontally.com/vendor/maplibre-gl.js.br'`. Every visitor paid 220 KiB
+for a body it threw away, then a second copy from the CDN, and the map waited for
+both. The page had a fallback to the CDN for this case, and the fallback is what kept
+the map drawing, but a fallback that fires on every visit is a cost, not a safety net.
+The library is back on jsDelivr and the fallback is gone.
+
+Three ways past the level this host compresses at, and what each one did:
+
+- **Declare the encoding.** Tested on the deploy of 2026-10-17, and the declaration is
+  passed through while the body is compressed again anyway. This is the attempt that
+  cost a deploy and is now reverted.
+- **Name the compressed file as the sibling of the plain one.** A request for
+  `/vendor/maplibre-gl.js` answered 274,739 bytes: this host's own brotli of the plain
+  file, not the 224,810-byte copy sitting beside it. There is no sibling convention.
+- **Serve it as a type the host does not compress.** Tested by the probe this build
+  publishes: the same compressed file under `application/ecmascript`, which the HTML
+  spec lists as JavaScript and which is not on the compressible list this host uses.
+  Nothing loads it. The first command below is the test, and 224,810 bytes is the
+  answer that would bring the library back to this host.
+
+A fourth way does not exist: the browser has `DecompressionStream`, but not for
+brotli, so the page cannot unpack the file itself.
+
+Both live checks are one command, and should be run again before anyone tries this a
+second time:
 
 ```sh
-curl -sI -H 'Accept-Encoding: br' https://tiles.jasontally.com/vendor/maplibre-gl.js.br
+# what a brotli-accepting browser gets from the compressed probe
+curl -s -H 'Accept-Encoding: br' -D - -o /tmp/lib.bin \
+  https://tiles.jasontally.com/vendor/maplibre-gl.js.br | grep -i content-encoding
+wc -c < /tmp/lib.bin
+
+# and from the plain path, where a compressed sibling would be picked up
+curl -s -H 'Accept-Encoding: br' https://tiles.jasontally.com/vendor/maplibre-gl.js | wc -c
 ```
 
-`Content-Encoding: br` and 224,810 bytes is the answer that means the deploy worked.
-Anything else means the platform compressed a body that was already compressed, and
-the page is on the CDN copy until the file is renamed and deployed again.
+224,810 bytes is the size of the file `build.mjs` wrote, and it is what the first
+command has to print for the library to be worth moving back. Under `text/javascript`
+it printed 224,815: the host had compressed the file a second time. The probe is the
+same file under `application/ecmascript`, so if the type is what decides, the first
+command now prints 224,810 and the page can come back to this host. If it prints
+224,815 again, or a gzip size, the answer is no and the probe can be deleted. The
+second command printed 274,739, which closes the sibling route.
 
-The uncompressed `/vendor/maplibre-gl.js` stays published: the tools and the tests
-read it, and a developer who would rather not deal with an encoding can fetch it.
+`wrangler dev` does not settle this either way: it answers with its own gzip on top of
+the declared encoding, which is the same failure for a different reason, and the local
+asset worker has no compression code at all. Only the deployed host counts.
+
+What the numbers above still say is that this host's own compression is gzip-class: it
+sends the style JSON as 3,410 bytes where brotli at its best writes 2,638. A host that
+honoured a declared encoding would be worth 50 KB and about 0.26 s on the profile this
+project measures against.
 
 ### What this measurement is not
 
@@ -218,7 +251,7 @@ and the file is taken again rather than trusted.
 | Glyph ranges, 2 stacks × 256 | 512 | 9.85 MB |
 | Sprite sheets, 5 flavours at 1x and 2x | 20 | 127 KB |
 | MapLibre GL JS and CSS | 2 | 1.09 MB |
-| MapLibre GL JS, brotli, written by the build | 1 | 220 KB |
+| MapLibre GL JS, brotli, the probe | 1 | 220 KB |
 | PMTiles JS | 1 | 50 KB |
 | Licences | 4 | 12 KB |
 | **Published total** | **540** | **11.40 MB** |
