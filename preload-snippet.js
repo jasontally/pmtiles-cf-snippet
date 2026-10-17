@@ -244,15 +244,20 @@ export function runtime(config) {
   // The style's sprite, at the variant the map will ask for. MapLibre gets the
   // sheet with an Image that sets crossOrigin "anonymous" and the index with a
   // fetch, so these two calls copy that mode and its own loads find the bytes in
-  // the cache rather than on the network. The map's pixel ratio picks the
-  // variant, and the page clamps that ratio to 1.5, so it is above one exactly
-  // when the device ratio is. Bytes, not correctness, hang on the guess: the
-  // wrong variant still loads, and the map fetches the other one.
+  // the cache rather than on the network.
+  //
+  // The map's pixel ratio picks the variant, and this repeats the ratio rule the
+  // page applies, because the device ratio alone no longer answers it. The page
+  // draws a phone at exactly 1, so a phone measures 2.625 and still asks for the
+  // 1x sheet. The two lines must stay the same as the rule beside
+  // map.setPixelRatio in web/index.html. Bytes, not correctness, hang on the
+  // guess: the wrong variant still loads, and the map fetches the other one.
   //
   // This runs last, after the wrapper above. Anything unexpected here then costs
   // the page a warm sprite, not the wrapper that answers every range read.
   if (config.sprite) {
-    const suffix = (window.devicePixelRatio || 1) > 1 ? "@2x" : "";
+    const phone = Math.min(window.innerWidth, window.innerHeight) < 700;
+    const suffix = !phone && (window.devicePixelRatio || 1) > 1 ? "@2x" : "";
     const sheet = new Image();
     sheet.crossOrigin = "anonymous";
     sheet.src = `${config.sprite}${suffix}.png`;

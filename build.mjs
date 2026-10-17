@@ -85,9 +85,17 @@ const MODULE_FILE = "snippet.js";
 // host honour a declared Content-Encoding when the response type is one it does not
 // compress? The page takes MapLibre from jsDelivr until that answer is yes, because
 // without it the browser gets two layers of compression and can use neither.
-// asset-hosting.md, "A body compressed at the build", has the question and the
-// measurements behind it.
-const PROBE_LIBRARY = "maplibre-gl.js.br";
+//
+// The name has no ".br" on the end on purpose. The first probe was
+// maplibre-gl.js.br and the host compressed it a second time anyway, which leaves
+// the name as the suspect: a name ending in .br may be treated as a pre-compressed
+// asset and compressed on that ground whatever the type says. The type itself is
+// settled. Under application/ecmascript the host stopped adding gzip, and Chrome
+// runs a script served as application/ecmascript, so the type is not what refuses
+// the library.
+//
+// asset-hosting.md, "A body compressed at the build", has the measurements.
+const PROBE_LIBRARY = "maplibre-gl-precompressed";
 /**
  * Caching and CORS for the assets a browser fetches from somebody else's page.
  *
@@ -122,8 +130,8 @@ const HEADERS_FILE =
   "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
   // The probe. text/javascript is a type this host compresses, and application/
-  // ecmascript is the same file to a browser under a type it may not, which is the
-  // whole question. See PROBE_LIBRARY.
+  // ecmascript is the same file to a browser under a type it may not compress,
+  // which is half the question. The name is the other half. See PROBE_LIBRARY.
   `/vendor/${PROBE_LIBRARY}\n` +
   "\tContent-Type: application/ecmascript\n" +
   "\tContent-Encoding: br\n" +

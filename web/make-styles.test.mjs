@@ -594,7 +594,7 @@ await check("the compressed probe is declared with the type it needs", () => {
   const headers = readFileSync(join(HERE, "..", "public", "_headers"), "utf8");
   assert.ok(
     headers.includes(
-      "/vendor/maplibre-gl.js.br\n\tContent-Type: application/ecmascript\n\tContent-Encoding: br"
+      "/vendor/maplibre-gl-precompressed\n\tContent-Type: application/ecmascript\n\tContent-Encoding: br"
     ),
     "the probe is served without the header that says what its body is"
   );

@@ -20,7 +20,7 @@ It reads. It deploys nothing and changes nothing.
 |---|---|---|
 | Glyph ranges | `/font/{fontstack}/{range}.pbf` | SIL OFL 1.1, at `/font/OFL.txt` |
 | Sprite sheets | `/sprites/v4/{flavour}` | MIT, at `/sprites/LICENSE.md` |
-| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.css`, and the probe `/vendor/maplibre-gl.js.br` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
+| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.css`, and the probe `/vendor/maplibre-gl-precompressed` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
 | PMTiles 3.2.1 | `/vendor/pmtiles.js` | BSD-3-Clause, at `/vendor/pmtiles-LICENSE.txt` |
 
 All four licences permit redistribution, and all four are published next to the
@@ -152,13 +152,24 @@ Three ways past the level this host compresses at, and what each one did:
 - **Name the compressed file as the sibling of the plain one.** A request for
   `/vendor/maplibre-gl.js` answered 274,739 bytes: this host's own brotli of the plain
   file, not the 224,810-byte copy sitting beside it. There is no sibling convention.
-- **Serve it as a type the host does not compress.** Tested by the probe this build
-  publishes: the same compressed file under `application/ecmascript`, which the HTML
-  spec lists as JavaScript and which is not on the compressible list this host uses.
-  Nothing loads it. The first command below is the test, and 224,810 bytes is the
-  answer that would bring the library back to this host.
+- **Serve it as a type the host does not compress.** Half tested. The probe published
+  on 2026-10-17 was the same compressed file under `application/ecmascript`, and the
+  type did change one thing: a client offering only gzip received the 224,810 bytes of
+  our file and no `Content-Encoding` line at all, where before it received gzip of
+  brotli. A client offering br received 224,815 bytes, and unpacking that once gives
+  exactly the file the build wrote and unpacking it twice gives the library, so the
+  host compressed our compressed file again. Chrome runs a script served as
+  `application/ecmascript`, checked locally with one page and four types, so the type
+  is not what refuses the library.
+- **Give it a name that does not end in .br.** The probe above was
+  `/vendor/maplibre-gl.js.br`, and a name ending in `.br` is what a host would treat as
+  a pre-compressed asset. So the probe this build publishes is the same bytes under
+  `/vendor/maplibre-gl-precompressed`, with the same two header lines, and nothing
+  loads it. The first command below is the test: 224,810 bytes with
+  `Content-Encoding: br` means the name was the obstacle and the page can come back to
+  this host. Anything else means this host cannot serve a pre-compressed body at all.
 
-A fourth way does not exist: the browser has `DecompressionStream`, but not for
+A further way does not exist: the browser has `DecompressionStream`, but not for
 brotli, so the page cannot unpack the file itself.
 
 Both live checks are one command, and should be run again before anyone tries this a
@@ -167,7 +178,7 @@ second time:
 ```sh
 # what a brotli-accepting browser gets from the compressed probe
 curl -s -H 'Accept-Encoding: br' -D - -o /tmp/lib.bin \
-  https://tiles.jasontally.com/vendor/maplibre-gl.js.br | grep -i content-encoding
+  https://tiles.jasontally.com/vendor/maplibre-gl-precompressed | grep -i content-encoding
 wc -c < /tmp/lib.bin
 
 # and from the plain path, where a compressed sibling would be picked up
@@ -175,12 +186,11 @@ curl -s -H 'Accept-Encoding: br' https://tiles.jasontally.com/vendor/maplibre-gl
 ```
 
 224,810 bytes is the size of the file `build.mjs` wrote, and it is what the first
-command has to print for the library to be worth moving back. Under `text/javascript`
-it printed 224,815: the host had compressed the file a second time. The probe is the
-same file under `application/ecmascript`, so if the type is what decides, the first
-command now prints 224,810 and the page can come back to this host. If it prints
-224,815 again, or a gzip size, the answer is no and the probe can be deleted. The
-second command printed 274,739, which closes the sibling route.
+command has to print for the library to be worth moving back. Its two ancestors both
+answered 224,815, one under `text/javascript` and one under `application/ecmascript`
+with `.br` in the name. The second command printed 274,739, which closes the sibling
+route: this host compresses the plain file itself rather than serving the compressed
+copy beside it.
 
 `wrangler dev` does not settle this either way: it answers with its own gzip on top of
 the declared encoding, which is the same failure for a different reason, and the local

@@ -247,14 +247,14 @@ class FakeImage {
     images.push({ src: value, crossOrigin: this.crossOrigin });
   }
 }
-const runSprite = (devicePixelRatio) => {
+const runSprite = (devicePixelRatio, width = 4000, height = 4000) => {
   const spritePage = {
     fetch: (url) => {
       spriteRequests.push(String(url));
       return Promise.resolve(new Response("{}", { status: 200 }));
     },
-    innerWidth: 4000,
-    innerHeight: 4000,
+    innerWidth: width,
+    innerHeight: height,
     devicePixelRatio,
   };
   vm.runInContext(
@@ -288,6 +288,16 @@ assert.deepEqual(
   images[1],
   { src: "https://tiles.example.com/sprites/v4/light.png", crossOrigin: "anonymous" },
   "a device ratio of one preloads the 1x sheet"
+);
+// A phone is the case the device ratio alone gets wrong: the page draws it at a
+// ratio of exactly one, so the warm must be the 1x sheet although the device
+// ratio is 2.625. Warming the 2x sheet there costs 29 KiB and one request for a
+// file the map never asks for, next to the 16 KiB sheet it does ask for.
+runSprite(2.625, 412, 823);
+assert.deepEqual(
+  images[2],
+  { src: "https://tiles.example.com/sprites/v4/light.png", crossOrigin: "anonymous" },
+  "a phone preloads the 1x sheet, because the map draws a phone at a ratio of one"
 );
 
 // Before the map's element is in the document there is nothing to measure, so
