@@ -20,7 +20,7 @@ It reads. It deploys nothing and changes nothing.
 |---|---|---|
 | Glyph ranges | `/font/{fontstack}/{range}.pbf` | SIL OFL 1.1, at `/font/OFL.txt` |
 | Sprite sheets | `/sprites/v4/{flavour}` | MIT, at `/sprites/LICENSE.md` |
-| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.css`, and the probe `/vendor/maplibre-gl-precompressed` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
+| MapLibre GL 5.24.0 | `/vendor/maplibre-gl.js`, `/vendor/maplibre-gl.css` | BSD-3-Clause, at `/vendor/maplibre-gl-LICENSE.txt` |
 | PMTiles 3.2.1 | `/vendor/pmtiles.js` | BSD-3-Clause, at `/vendor/pmtiles-LICENSE.txt` |
 
 All four licences permit redistribution, and all four are published next to the
@@ -161,13 +161,14 @@ Three ways past the level this host compresses at, and what each one did:
   host compressed our compressed file again. Chrome runs a script served as
   `application/ecmascript`, checked locally with one page and four types, so the type
   is not what refuses the library.
-- **Give it a name that does not end in .br.** The probe above was
-  `/vendor/maplibre-gl.js.br`, and a name ending in `.br` is what a host would treat as
-  a pre-compressed asset. So the probe this build publishes is the same bytes under
-  `/vendor/maplibre-gl-precompressed`, with the same two header lines, and nothing
-  loads it. The first command below is the test: 224,810 bytes with
-  `Content-Encoding: br` means the name was the obstacle and the page can come back to
-  this host. Anything else means this host cannot serve a pre-compressed body at all.
+- **Give it a name that does not end in .br.** Tested on 2026-10-17, and the name was
+  not what stood between this host and a pre-compressed body. The probe was the same
+  compressed bytes under `/vendor/maplibre-gl-precompressed`, with
+  `Content-Type: application/ecmascript` and its own `Content-Encoding: br`, and a
+  client offering br received 224,815 bytes, a client offering gzip only received
+  224,810 bytes raw with no encoding line at all. The two responses are the sizes and
+  shapes of the `.br` name, byte for byte, so the name plays no part. This was the
+  last route this host left open, and the probe was deleted with the come-up short.
 
 A further way does not exist: the browser has `DecompressionStream`, but not for
 brotli, so the page cannot unpack the file itself.
@@ -176,21 +177,15 @@ Both live checks are one command, and should be run again before anyone tries th
 second time:
 
 ```sh
-# what a brotli-accepting browser gets from the compressed probe
+# what a brotli-accepting browser gets from the plain path, on this host —
+# for the probes themselves, the answer is in the four bullets above
 curl -s -H 'Accept-Encoding: br' -D - -o /tmp/lib.bin \
-  https://tiles.jasontally.com/vendor/maplibre-gl-precompressed | grep -i content-encoding
+  https://tiles.jasontally.com/vendor/maplibre-gl.js | grep -i content-encoding
 wc -c < /tmp/lib.bin
-
-# and from the plain path, where a compressed sibling would be picked up
-curl -s -H 'Accept-Encoding: br' https://tiles.jasontally.com/vendor/maplibre-gl.js | wc -c
 ```
 
-224,810 bytes is the size of the file `build.mjs` wrote, and it is what the first
-command has to print for the library to be worth moving back. Its two ancestors both
-answered 224,815, one under `text/javascript` and one under `application/ecmascript`
-with `.br` in the name. The second command printed 274,739, which closes the sibling
-route: this host compresses the plain file itself rather than serving the compressed
-copy beside it.
+274,643 bytes with `Content-Encoding: br` is the host's own brotli of the plain
+file, which is correct today and needs nothing from anyone.
 
 `wrangler dev` does not settle this either way: it answers with its own gzip on top of
 the declared encoding, which is the same failure for a different reason, and the local
@@ -261,14 +256,14 @@ and the file is taken again rather than trusted.
 | Glyph ranges, 2 stacks × 256 | 512 | 9.85 MB |
 | Sprite sheets, 5 flavours at 1x and 2x | 20 | 127 KB |
 | MapLibre GL JS and CSS | 2 | 1.09 MB |
-| MapLibre GL JS, brotli, the probe | 1 | 220 KB |
 | PMTiles JS | 1 | 50 KB |
 | Licences | 4 | 12 KB |
-| **Published total** | **540** | **11.40 MB** |
+| **Published total** | **539** | **11.18 MB** |
 
-Against the limits that matter: 540 files is half a percent of the 100,000 a Worker
-holds, and 11.4 MB is nothing next to the 20 GB of disk a build container gets. The
-first deploy of these uploaded 540 files in 3.5 seconds.
+Against the limits that matter: 539 files is half a percent of the 100,000 a Worker
+holds, and 11.18 MB is nothing next to the 20 GB of disk a build container gets. The
+first deploy of these uploaded 540 files in 3.5 seconds; the probe that arrived later
+and left on 2026-10-17 moved another single file.
 
 ## One wrinkle worth knowing
 

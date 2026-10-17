@@ -59,7 +59,6 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
-import { brotliCompressSync, constants as zlib } from "node:zlib";
 import {
   foreignRules, lostRules, mergeSnippetRule, rulesMatch, writable, WRITABLE,
 } from "./snippet-rules.mjs";
@@ -77,25 +76,6 @@ const MAX_SNIPPET_BYTES = 32 * 1024;
 // Cloudflare requires the two to agree.
 const MODULE_FILE = "snippet.js";
 
-// Same content shard-pmtiles.py writes. Kept here so a build that skips the
-// split still leaves the assets directory in a deployable state.
-
-// The compressed library the build publishes as a probe. Nothing on the page loads
-// it. It exists so that one curl after a deploy can answer one question: does this
-// host honour a declared Content-Encoding when the response type is one it does not
-// compress? The page takes MapLibre from jsDelivr until that answer is yes, because
-// without it the browser gets two layers of compression and can use neither.
-//
-// The name has no ".br" on the end on purpose. The first probe was
-// maplibre-gl.js.br and the host compressed it a second time anyway, which leaves
-// the name as the suspect: a name ending in .br may be treated as a pre-compressed
-// asset and compressed on that ground whatever the type says. The type itself is
-// settled. Under application/ecmascript the host stopped adding gzip, and Chrome
-// runs a script served as application/ecmascript, so the type is not what refuses
-// the library.
-//
-// asset-hosting.md, "A body compressed at the build", has the measurements.
-const PROBE_LIBRARY = "maplibre-gl-precompressed";
 /**
  * Caching and CORS for the assets a browser fetches from somebody else's page.
  *
@@ -129,13 +109,6 @@ const HEADERS_FILE =
   "/vendor/*\n" +
   "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
-  // The probe. text/javascript is a type this host compresses, and application/
-  // ecmascript is the same file to a browser under a type it may not compress,
-  // which is half the question. The name is the other half. See PROBE_LIBRARY.
-  `/vendor/${PROBE_LIBRARY}\n` +
-  "\tContent-Type: application/ecmascript\n" +
-  "\tContent-Encoding: br\n" +
-  "\tVary: Accept-Encoding\n" +
   "/styles/*\n" +
   "\tCache-Control: public, max-age=604800\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
@@ -959,9 +932,6 @@ async function prepare() {
   // asset tree stays purely generated, and so a stray split cannot commit 118
   // GiB of parts. prepare writes it because the deploy step uploads it.
   writeDocs();
-
-  step("compress the library probe");
-  compressLibraryProbe();
   return haveAssets;
 }
 
@@ -1008,8 +978,6 @@ function writeDocs() {
  * The two libraries are copied too, and the documentation page does not use these
  * copies because jsDelivr measured faster for them. They are published so that a
  * developer who wants one hostname can have one. asset-hosting.md has the numbers.
- * compressLibraryProbe writes one more copy beside them, compressed, which nothing
- * loads.
  *
  * The paths mirror what MapLibre asks for:
  *   /font/{fontstack}/{range}.pbf
@@ -1079,43 +1047,6 @@ function measure(dir) {
     }
   }
   return { files, bytes };
-}
-
-/**
- * Publish the compressed library as a probe, under a type this host may not
- * compress.
- *
- * Nothing on the page loads this file. It is here for one curl after a deploy: if
- * the response carries the declared Content-Encoding and the 224,810 bytes this
- * function wrote, then this host honours a declared encoding for that type, and the
- * page can have the 50 KB back. If the response is larger than the file, the host
- * compressed it a second time and the page stays on jsDelivr. asset-hosting.md has
- * the arithmetic and both commands.
- *
- * The plain copy stays published beside it: the tools and the tests read that one.
- */
-function compressLibraryProbe() {
-  const source = join(PUBLIC_DIR, "vendor", "maplibre-gl.js");
-  if (!existsSync(source)) {
-    console.log("no public/vendor/maplibre-gl.js to compress, skipping");
-    return;
-  }
-  const body = readFileSync(source);
-  const packed = brotliCompressSync(body, {
-    params: {
-      [zlib.BROTLI_PARAM_QUALITY]: 11,
-      [zlib.BROTLI_PARAM_SIZE_HINT]: body.length,
-    },
-  });
-  const target = join(PUBLIC_DIR, "vendor", PROBE_LIBRARY);
-  // Written only when the bytes differ, so a build that changes nothing leaves the
-  // file alone rather than replacing it with a copy of itself.
-  if (existsSync(target) && readFileSync(target).equals(packed)) {
-    console.log(`public/vendor/${PROBE_LIBRARY} is current (${packed.length} bytes)`);
-    return;
-  }
-  writeFileSync(target, packed);
-  console.log(`public/vendor/${PROBE_LIBRARY} (${body.length} -> ${packed.length} bytes)`);
 }
 
 /**

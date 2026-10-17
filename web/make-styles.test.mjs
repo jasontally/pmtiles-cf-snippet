@@ -587,19 +587,6 @@ await check("the libraries are pinned to a version with an integrity hash", asyn
   }
 });
 
-await check("the compressed probe is declared with the type it needs", () => {
-  // Nothing loads the probe. It is published so that one curl after a deploy can say
-  // whether this host honours a declared encoding for a type it does not compress,
-  // and this rule is all of it. asset-hosting.md has the question and the commands.
-  const headers = readFileSync(join(HERE, "..", "public", "_headers"), "utf8");
-  assert.ok(
-    headers.includes(
-      "/vendor/maplibre-gl-precompressed\n\tContent-Type: application/ecmascript\n\tContent-Encoding: br"
-    ),
-    "the probe is served without the header that says what its body is"
-  );
-});
-
 await check("the page documents the fonts and the sprites it serves", () => {
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   assert.ok(page.includes("Fonts and sprites"), "the page has no section on fonts and sprites");
