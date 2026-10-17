@@ -13,7 +13,7 @@
  */
 
 import assert from "node:assert/strict";
-import { gunzipSync } from "node:zlib";
+import { brotliDecompressSync, gunzipSync } from "node:zlib";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
@@ -566,8 +566,8 @@ await check("a toggle says which zoom it starts at, and that is true", () => {
 
 await check("the libraries are pinned to a version with an integrity hash", async () => {
   // A wrong hash does not degrade, it blocks: the script never runs, the map never
-  // appears, and the error most visitors will never read. So the digest in the page
-  // is recomputed from the bytes the CDN serves, not trusted.
+  // appears, and the error most visitors will never read. So every digest in the
+  // page is recomputed from bytes, not trusted.
   //
   // Pinned, not floating. With @5 the bytes under a URL can change without the URL
   // changing, and an integrity hash is then impossible, which is what let this page
@@ -576,7 +576,7 @@ await check("the libraries are pinned to a version with an integrity hash", asyn
   const tags = [...page.matchAll(
     /(?:href|src)="(https:\/\/cdn\.jsdelivr\.net\/npm\/[^"]+@([\d.]+)\/[^"]+)"\s*\n\s*integrity="([^"]+)"/g
   )];
-  assert.equal(tags.length, 4, `expected 4 pinned CDN tags, found ${tags.length}`);
+  assert.equal(tags.length, 3, `expected 3 pinned CDN tags, found ${tags.length}`);
   assert.ok(!/@\d+\/dist\//.test(page.replace(/@[\d.]+\//g, "@")), "a tag uses a floating version");
   for (const [, url, version, integrity] of tags) {
     const response = await fetch(url);
@@ -585,6 +585,37 @@ await check("the libraries are pinned to a version with an integrity hash", asyn
     const digest = "sha384-" + createHash("sha384").update(bytes).digest("base64");
     assert.equal(integrity, digest, `${url} is pinned at ${version} but the hash is for other bytes`);
   }
+
+  // The library is the fourth tag and the only one from this host. It is served as
+  // a brotli stream that the response declares, so the browser checks the hash
+  // against the body it ends up with: the vendored file. Recompute the hash from
+  // that file, then unpack what the build wrote and check it is the same bytes. A
+  // tag pointed at the wrong file, or a copy that went stale, fails here rather
+  // than in a browser, where the only symptom is a blank map.
+  const local = [...page.matchAll(/<script defer src="([^"]+)"\s*\n\s*integrity="([^"]+)"/g)]
+    .filter(([, src]) => !src.startsWith("http"));
+  assert.equal(local.length, 1, `expected 1 same-origin script tag, found ${local.length}`);
+  const [, path, integrity] = local[0];
+  const name = path.split("/").pop();
+  assert.equal(path, `/vendor/${name}`, "the same-origin script must be under /vendor/");
+  const plain = readFileSync(join(HERE, "..", "public", "vendor", "maplibre-gl.js"));
+  assert.equal(
+    integrity, "sha384-" + createHash("sha384").update(plain).digest("base64"),
+    "the tag's hash is not the hash of the vendored library"
+  );
+  const served = join(HERE, "..", "public", "vendor", name);
+  assert.ok(existsSync(served), `${path} was not built`);
+  assert.ok(
+    brotliDecompressSync(readFileSync(served)).equals(plain),
+    `${path} is not this build's brotli of the vendored library`
+  );
+  // A brotli stream with no word that it is one is a script that never runs, so the
+  // header rule is part of the build output this test covers.
+  const headers = readFileSync(join(HERE, "..", "public", "_headers"), "utf8");
+  assert.ok(
+    headers.includes(`/vendor/${name}\n\tContent-Type: text/javascript\n\tContent-Encoding: br`),
+    `${path} is served without the header that says what it is`
+  );
 });
 
 await check("the page documents the fonts and the sprites it serves", () => {

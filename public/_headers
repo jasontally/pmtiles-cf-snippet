@@ -15,6 +15,10 @@
 /vendor/*
 	Cache-Control: public, max-age=31536000, immutable
 	Access-Control-Allow-Origin: *
+/vendor/maplibre-gl.js.br
+	Content-Type: text/javascript
+	Content-Encoding: br
+	Vary: Accept-Encoding
 /styles/*
 	Cache-Control: public, max-age=604800
 	Access-Control-Allow-Origin: *

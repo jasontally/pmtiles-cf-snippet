@@ -59,6 +59,7 @@ import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 import { pipeline } from "node:stream/promises";
 import { Readable } from "node:stream";
+import { brotliCompressSync, constants as zlib } from "node:zlib";
 import {
   foreignRules, lostRules, mergeSnippetRule, rulesMatch, writable, WRITABLE,
 } from "./snippet-rules.mjs";
@@ -78,6 +79,12 @@ const MODULE_FILE = "snippet.js";
 
 // Same content shard-pmtiles.py writes. Kept here so a build that skips the
 // split still leaves the assets directory in a deployable state.
+
+// The page loads MapLibre from this host as a body that is already compressed, so
+// the file name, the header rule and the tag in web/index.html have to agree. The
+// test suite recomputes the digest the tag carries from the plain file, so a stale
+// copy fails the build rather than a browser.
+const PAGE_LIBRARY = "maplibre-gl.js.br";
 /**
  * Caching and CORS for the assets a browser fetches from somebody else's page.
  *
@@ -111,6 +118,14 @@ const HEADERS_FILE =
   "/vendor/*\n" +
   "\tCache-Control: public, max-age=31536000, immutable\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
+  // The page loads this one as a script, so the response has to say what the body
+  // is: a brotli stream, and JavaScript once it is unpacked. Without the first line
+  // a browser runs the compressed bytes, and without the second it refuses the
+  // response for its type. Both are checked after each deploy; see PAGE_LIBRARY.
+  `/vendor/${PAGE_LIBRARY}\n` +
+  "\tContent-Type: text/javascript\n" +
+  "\tContent-Encoding: br\n" +
+  "\tVary: Accept-Encoding\n" +
   "/styles/*\n" +
   "\tCache-Control: public, max-age=604800\n" +
   "\tAccess-Control-Allow-Origin: *\n" +
@@ -934,6 +949,9 @@ async function prepare() {
   // asset tree stays purely generated, and so a stray split cannot commit 118
   // GiB of parts. prepare writes it because the deploy step uploads it.
   writeDocs();
+
+  step("compress the library the page loads");
+  compressPageLibrary();
   return haveAssets;
 }
 
@@ -977,9 +995,11 @@ function writeDocs() {
  * one hostname, and the styles can tell a developer to swap a hostname and nothing
  * else.
  *
- * The two libraries are copied too, and the documentation page does not use these
- * copies because jsDelivr measured faster for them. They are published so that a
- * developer who wants one hostname can have one. asset-hosting.md has the numbers.
+ * The libraries are copied too, and the page loads one of them: the pre-compressed
+ * copy of MapLibre that compressPageLibrary writes beside it, because brotli at its
+ * best beats anything the CDN or this host does on the fly. The other two are
+ * published for tools and for a developer who wants one hostname, and the page
+ * takes those from the CDN. asset-hosting.md has the numbers.
  *
  * The paths mirror what MapLibre asks for:
  *   /font/{fontstack}/{range}.pbf
@@ -1049,6 +1069,49 @@ function measure(dir) {
     }
   }
   return { files, bytes };
+}
+
+/**
+ * Publish the library the page loads as a body that is already compressed.
+ *
+ * The assets platform compresses what it serves, but at one level and no better:
+ * it sends the vendored MapLibre in 274,643 bytes, and jsDelivr in 276,601, where
+ * brotli at its best writes 224,810. That 50 KB is a quarter of a second on the
+ * mobile profile this project measures against, and the only way to have it is to
+ * do the compression here and tell the host to send the result as it is. The CDN
+ * cannot prebuild a file it does not host.
+ *
+ * The uncompressed copy stays published beside it: the tools and the tests read
+ * that one, and a developer who would rather not deal with an encoding can fetch
+ * it.
+ *
+ * Only the library is worth this. The CSS and the PMTiles library are 9,452 and
+ * 13,272 bytes on the CDN, where brotli at its best saves 1,285 and 2,185: less
+ * than the round trip a move to this host would cost. asset-hosting.md has both
+ * halves of the arithmetic.
+ */
+function compressPageLibrary() {
+  const source = join(PUBLIC_DIR, "vendor", "maplibre-gl.js");
+  if (!existsSync(source)) {
+    console.log("no public/vendor/maplibre-gl.js to compress, skipping");
+    return;
+  }
+  const body = readFileSync(source);
+  const packed = brotliCompressSync(body, {
+    params: {
+      [zlib.BROTLI_PARAM_QUALITY]: 11,
+      [zlib.BROTLI_PARAM_SIZE_HINT]: body.length,
+    },
+  });
+  const target = join(PUBLIC_DIR, "vendor", PAGE_LIBRARY);
+  // Written only when the bytes differ, so a build that changes nothing leaves the
+  // file alone rather than replacing it with a copy of itself.
+  if (existsSync(target) && readFileSync(target).equals(packed)) {
+    console.log(`public/vendor/${PAGE_LIBRARY} is current (${packed.length} bytes)`);
+    return;
+  }
+  writeFileSync(target, packed);
+  console.log(`public/vendor/${PAGE_LIBRARY} (${body.length} -> ${packed.length} bytes)`);
 }
 
 /**

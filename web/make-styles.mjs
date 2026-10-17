@@ -122,11 +122,20 @@ export function missingIcons(style, sheets = ["light", "dark"]) {
   return [...missing];
 }
 
-// Noto Sans Medium is what upstream Protomaps uses for bold, and it is the only
-// bold-ish stack in the OFL set we vendor. "Noto Sans Bold" does not exist there,
-// which is the other half of why the glyphs had to come from the demo host.
+// One stack, not two. Noto Sans Medium is what upstream Protomaps uses for bold
+// and it is the only bold-ish stack in the OFL set we vendor, but a second stack
+// is a second glyph range on the first view: the browser asked for both 0-255
+// ranges while the map was still booting, 76 KB and 78 KB of a 670 KB critical
+// path, which is about 0.4 s of the first view on the mobile profile this project
+// measures against. "Noto Sans Bold" is not in the OFL set at all, which is why
+// the styles once pointed at the demo host for it.
+//
+// The labels that were set in Medium keep the rest of what separates them: the
+// country name is uppercase, the place labels are at the top of the size range,
+// and the shield numbers sit inside their shield. Medium is still published at
+// /font for anyone who wants the weight, and naming it here again is one word.
 export const FONT = ["Noto Sans Regular"];
-export const FONT_BOLD = ["Noto Sans Medium"];
+export const FONT_BOLD = FONT;
 
 /**
  * The nine source layers in this archive, with the zoom range each one carries.
@@ -1210,9 +1219,10 @@ function main() {
       sprite: SPRITES,
       fonts: ["Noto Sans Regular", "Noto Sans Medium"],
       sprites: ["light", "dark", "grayscale", "black", "white"],
-      // The libraries, published here as well as on jsDelivr. The page itself loads
-      // them from jsDelivr because that measured faster; these are here so a
-      // developer can serve a whole map from one hostname.
+      // The libraries, published here as well as on jsDelivr. The page loads the
+      // library from here, as a body compressed at build time that the host
+      // declares the encoding of, and the other two from jsDelivr, which measures
+      // faster for a file that small. See asset-hosting.md.
       libraries: [
         { name: "MapLibre GL JS", version: "5.24.0", path: "/vendor/maplibre-gl.js", licence: "BSD-3-Clause" },
         { name: "MapLibre GL CSS", version: "5.24.0", path: "/vendor/maplibre-gl.css", licence: "BSD-3-Clause" },
