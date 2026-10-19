@@ -298,7 +298,7 @@ export async function downloadRun(url, run, outDir, options = {}) {
   const {
     minRate = 8_000_000,
     graceSeconds = 45,
-    maxAttempts = 6,
+    maxAttempts = 10,
     fetchImpl = fetch,
     onAttempt = () => {},
   } = options;
