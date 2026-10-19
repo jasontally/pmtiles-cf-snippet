@@ -621,7 +621,7 @@ function preloadRule() {
  * When the file is missing the marker stays in place and parses as an empty
  * table. The snippet still deploys, and injects nothing.
  */
-function inlinePreloadTable(source) {
+export function inlinePreloadTable(source) {
   const marker = '"__PRELOAD_TABLE__"';
   if (!source.includes(marker)) {
     console.log("preload snippet has no table marker, leaving it alone");
@@ -651,7 +651,7 @@ function inlinePreloadTable(source) {
  * snippet parses it with the same "unusable marker parses as nothing" rule as
  * the table.
  */
-function inlinePreloadMeta(source) {
+export function inlinePreloadMeta(source) {
   const marker = '"__PRELOAD_META__"';
   if (!source.includes(marker)) {
     console.log("preload snippet has no meta marker, leaving it alone");
@@ -1062,7 +1062,7 @@ async function deploy() {
 }
 
 /** Minify, check the size and the export, and return the code. */
-async function minifySnippet(
+export async function minifySnippet(
   sourcePath = SNIPPET_SOURCE,
   name = env("SNIPPET_NAME", "pmtiles"),
   sourceText = null
