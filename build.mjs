@@ -40,8 +40,8 @@
  *   TILE_SHARD             tile part size (default: 2000000)
  *   LEAF_SHARD             leaf part size (default: 160000)
  *   SHARD_COUNT            number of shard Workers (default: 25)
- *   PRELOAD_ARCHIVE_URL    archive the preload table describes (default: the
- *                          URL this host serves, when SNIPPET_HOST is set)
+ *   PRELOAD_ARCHIVE_URL    archive the preload table describes. Unset, the table
+ *                          is read from the shards, which hold the archive.
  *   SKIP_PRELOAD_GENERATOR 1 to skip the preload table (default: 0)
  *   DOWNLOAD               0 to never download (default: 1)
  *   SKIP_VERIFY            1 to skip the byte for byte check (default: 0)
@@ -892,18 +892,17 @@ async function prepare() {
       join(ROOT, "tools", "generate-preloads.mjs"),
       "--table", join(DIST_DIR, "preload-table.txt"),
       "--meta", join(DIST_DIR, "preload-meta.json"),
+      "--archive-name", env("ARCHIVE_NAME", "basemap"),
     ];
-    // An explicit archive is about to be published, so it is the right source.
-    // Otherwise the table follows the archive the deployment serves, with the
-    // weekly Protomaps build as the fallback for a host with nothing live yet.
-    const liveArchive = env(
-      "PRELOAD_ARCHIVE_URL",
-      env("SNIPPET_HOST", "")
-        ? `https://${env("SNIPPET_HOST")}/${env("ARCHIVE_NAME", "basemap")}.pmtiles`
-        : ""
-    );
-    if (liveArchive) generatorArgs.push("--live-archive", liveArchive);
+    // The generator reads the shards by default, through the same files the
+    // reader reads. The host this build publishes cannot be the source: it runs
+    // the reader this build is about to replace, and the reader refuses a range
+    // past its own total, so a grown archive deadlocked the build against the
+    // reader it was meant to publish. An archive the build holds is the right
+    // source, because it is about to publish those bytes.
+    const explicit = process.env.PRELOAD_ARCHIVE_URL || "";
     if (archive) generatorArgs.push("--archive", archive);
+    else if (explicit) generatorArgs.push("--archive", explicit);
     run("node", generatorArgs);
   }
 

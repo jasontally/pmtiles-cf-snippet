@@ -1,6 +1,6 @@
 /**
  * Cloudflare Snippet: serve a PMTiles archive that is split across Static Asset
- * files on 13 separate Workers.
+ * files on 25 separate Workers.
  *
  * WHY THIS IS NOT A PLAIN RANGE SERVER
  * Workers Static Assets do not answer HTTP Range requests. There is no
@@ -14,17 +14,22 @@
  * The largest request measured from the Protomaps basemap is a leaf directory of
  * 150,036 bytes. A tile is usually about 200 bytes.
  *
- * WHY 13 HOSTS
- * The archive is 126,775,469,007 bytes, 118 GiB. A Workers Builds container has
+ * WHY 25 HOSTS
+ * The archive is 138,941,094,895 bytes, 129 GiB. A Workers Builds container has
  * 20 GB of disk and about 30 usable minutes, so no single build can hold or
- * upload it. The archive is therefore split across 13 Workers, each with its own
- * repo, build, and hostname s.tiles0..s.tiles12.jasontally.com.
+ * upload it. The archive is therefore split across 25 Workers, each with its own
+ * repo, build, and hostname s.tiles0..s.tiles24.jasontally.com.
  *
  * Shard k owns tile parts [k * tilePartsPerShard, (k+1) * tilePartsPerShard).
  * Boundaries land on part boundaries, never inside a part, so a part number
  * gives its shard with one integer division and a tile request always costs one
  * subrequest. The head, the metadata, and the leaf directories are all small, so
  * they live in shard 0 together, and shard 0 is pure tile data before them.
+ *
+ * The offsets below change whenever the archive changes, because the tile
+ * section changes length. tools/sync-reader.mjs reads them out of the header
+ * that shard 0 serves and rewrites this table, and tools/generate-preloads.mjs
+ * reads the archive through the same shards for the same reason.
  *
  * Budget for this snippet: 2 subrequests (the Pro plan limit), 5 ms of CPU,
  * 2 MB of memory, 32 KB of package. No caches.default here, because a Cache API
@@ -69,7 +74,10 @@ const SHARD_HOST_PREFIX = "https://s.tiles";
 const SHARD_HOST_SUFFIX = ".jasontally.com";
 const SHARD_COUNT = 25;
 
-const ARCHIVES = {
+// Exported because the build reads the archive the same way this reader does,
+// through the same files, and needs the same offsets. See
+// tools/generate-preloads.mjs.
+export const ARCHIVES = {
   // total, headEnd, tileOffset, metaOffset, leafOffset, tileShard, leafShard,
   // tilePartsPerShard
   basemap: {
@@ -179,6 +187,23 @@ function shardOrigin(host) {
 }
 
 /**
+ * The name of one asset file: head.bin, meta.bin, or a numbered part.
+ *
+ * The build reads the archive through these files, so the names live here
+ * rather than in two places. See tools/generate-preloads.mjs.
+ */
+export function assetFile(kind, index) {
+  return kind === "head" || kind === "meta"
+    ? `${kind}.bin`
+    : `${kind}/${String(index).padStart(6, "0")}.bin`;
+}
+
+/** The URL of one asset file on a shard. */
+export function assetUrl(name, host, kind, index) {
+  return `${shardOrigin(host)}${ARCHIVE_PATH}${name}/${assetFile(kind, index)}`;
+}
+
+/**
  * Map a client byte range onto the asset reads that serve it.
  *
  * Every read names the shard it lives on, because the shards are different
@@ -259,10 +284,8 @@ export function planReads(start, end, archive) {
  * 2,000,000 B: a part read is 0.25 s from the edge with 0.11 s to first byte.
  */
 async function fetchPart(name, archive, read) {
-  const file = read.kind === "head" || read.kind === "meta"
-    ? `${read.kind}.bin`
-    : `${read.kind}/${String(read.index).padStart(6, "0")}.bin`;
-  const target = `${shardOrigin(read.host)}${ARCHIVE_PATH}${name}/${file}`;
+  const file = assetFile(read.kind, read.index);
+  const target = assetUrl(name, read.host, read.kind, read.index);
 
   const response = await fetch(target);
   if (response.status !== 200) {

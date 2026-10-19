@@ -42,9 +42,9 @@ const HEAD_URL = "https://s.tiles0.jasontally.com/s/basemap/head.bin";
 const ARCHIVE_NAME = "basemap";
 
 const HEAD_BYTES = 16_384;
-const TILE_SHARD = 1_000_000;
-const LEAF_SHARD = 160_000;
-const SHARD_COUNT = 25;
+export const TILE_SHARD = 1_000_000;
+export const LEAF_SHARD = 160_000;
+export const SHARD_COUNT = 25;
 
 const planOnly = process.argv.includes("--plan");
 

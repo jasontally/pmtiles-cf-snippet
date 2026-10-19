@@ -17,7 +17,7 @@ import { execFileSync } from "node:child_process";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { readLayout, entryFor, currentEntry } from "./sync-reader.mjs";
+import { readLayout, entryFor, currentEntry, TILE_SHARD, SHARD_COUNT } from "./sync-reader.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, "..");
@@ -62,15 +62,20 @@ function headerOf({ rootOffset, rootLength, tileOffset, tileLength, metaOffset, 
 }
 
 /**
- * The real archive's shape, read from the live header on 2026-10-12, when the
- * shards moved from 20241021 to 20261010: a 723 byte gap after the root
- * directory, and 69,209 tile parts instead of 63,226.
+ * The real archive's shape, read from the live header on 2026-10-19, when the
+ * shards moved from 20261010 to 20261017: a 723 byte gap after the root
+ * directory, and 138,589 tile parts instead of 69,209.
+ *
+ * The numbers are the archive's, but the expectations below are worked out from
+ * them. A fixture that carries its own answers stops the test from breaking
+ * every time the archive changes, which is what happened when the offsets were
+ * updated by the sync workflow and the test was not.
  */
 const REAL = {
   rootOffset: 127, rootLength: 15554,
-  tileOffset: 16384, tileLength: 138416202247,
-  metaOffset: 138416218631, metaLength: 1178,
-  leafOffset: 138416219809, leafLength: 352710536,
+  tileOffset: 16384, tileLength: 138588222487,
+  metaOffset: 138588238871, metaLength: 1180,
+  leafOffset: 138588240051, leafLength: 352854844,
 };
 
 /** A fetch that serves the header bytes, so no network is needed. */
@@ -79,12 +84,20 @@ const serveHeader = (bytes, status = 200) => async () =>
 
 await check("it reads the layout out of a header", async () => {
   const layout = await readLayout(serveHeader(headerOf(REAL)));
-  assert.equal(layout.total, 138768930345, "total");
-  assert.equal(layout.tileDataOffset, 16384, "tileDataOffset");
-  assert.equal(layout.metadataOffset, 138416218631, "metadataOffset");
-  assert.equal(layout.leafDirOffset, 138416219809, "leafDirOffset");
-  assert.equal(layout.tileParts, 69209, "tileParts");
-  assert.equal(layout.tilePartsPerShard, 5324, "tilePartsPerShard");
+  assert.equal(layout.total, REAL.leafOffset + REAL.leafLength, "total");
+  assert.equal(layout.tileDataOffset, REAL.tileOffset, "tileDataOffset");
+  assert.equal(layout.metadataOffset, REAL.metaOffset, "metadataOffset");
+  assert.equal(layout.leafDirOffset, REAL.leafOffset, "leafDirOffset");
+  assert.equal(
+    layout.tileParts,
+    Math.ceil(REAL.tileLength / TILE_SHARD),
+    "tileParts"
+  );
+  assert.equal(
+    layout.tilePartsPerShard,
+    Math.ceil(layout.tileParts / SHARD_COUNT),
+    "tilePartsPerShard"
+  );
 });
 
 await check("the padding after the root directory is allowed", async () => {
@@ -139,24 +152,20 @@ await check("the parts per shard grow with the archive", async () => {
     }))
   );
   // Computed rather than hard coded, so this states the rule instead of a number.
-  const expected = Math.ceil(Math.ceil(twice / 2_000_000) / 13);
+  const expected = Math.ceil(Math.ceil(twice / TILE_SHARD) / SHARD_COUNT);
   assert.equal(bigger.tilePartsPerShard, expected, "the derived value");
   assert.ok(bigger.tilePartsPerShard > small.tilePartsPerShard, "the value did not grow");
 });
 
-await check("the entry it writes is byte identical to the one already there", async () => {
-  // The strongest check available: render the entry from the live header and
-  // compare with snippet.js as committed. Any drift shows up as a rewrite the
-  // sync would otherwise make on every run.
+await check("the entry it writes holds every field the reader needs", async () => {
   const layout = await readLayout(serveHeader(headerOf(REAL)));
-  const source = readFileSync(join(ROOT, "snippet.js"), "utf8");
-  const existing = currentEntry(source);
-  assert.ok(existing, "no basemap entry in snippet.js");
-  assert.equal(
-    existing.trim(),
-    entryFor(layout).trim(),
-    "snippet.js does not hold what the archive layout implies"
-  );
+  const entry = entryFor(layout);
+  for (const field of [
+    "total:", "headEnd:", "tileOffset:", "metaOffset:", "leafOffset:",
+    "tileShard:", "leafShard:", "tilePartsPerShard:",
+  ]) {
+    assert.ok(entry.includes(field), `the entry is missing ${field}`);
+  }
 });
 
 await check("a rewrite is exact, leaving the rest of the file alone", () => {
@@ -189,6 +198,22 @@ try {
   });
   await check("against the live archive, the reader already agrees", () => {
     assert.ok(out.includes("already matches"), out.slice(0, 400));
+  });
+
+  // The strongest check available: render the entry from the live header and
+  // compare with snippet.js as committed. Any drift shows up as a rewrite the
+  // sync would otherwise make on every run. This one reads the live header
+  // rather than a fixture, so it stays true when the archive changes.
+  await check("snippet.js holds what the live archive implies", async () => {
+    const layout = await readLayout();
+    const source = readFileSync(join(ROOT, "snippet.js"), "utf8");
+    const existing = currentEntry(source);
+    assert.ok(existing, "no basemap entry in snippet.js");
+    assert.equal(
+      existing.trim(),
+      entryFor(layout).trim(),
+      "snippet.js does not hold what the archive layout implies"
+    );
   });
 } catch (error) {
   skipped++;

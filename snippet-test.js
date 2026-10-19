@@ -103,9 +103,11 @@ async function loadSnippet(modules, hosts = {}) {
     patched = patched.replace(re, `const ${key} = ${JSON.stringify(value)};`);
   }
   // The trailing `export const` lines are constants kept for readers; the tests
-  // use planReads, which is a function and must stay.
+  // use planReads, which is a function and must stay. Only the one line
+  // constants go: ARCHIVES spans several lines, and cutting its first line
+  // would leave an object behind.
   const url = "data:text/javascript;base64," +
-    Buffer.from(patched.replace(/^export const [^\n]*\n/gm, "")).toString("base64");
+    Buffer.from(patched.replace(/^export const [^\n]*;\n/gm, "")).toString("base64");
   return import(url);
 }
 
@@ -113,7 +115,7 @@ async function loadSnippet(modules, hosts = {}) {
 async function loadRealSnippet() {
   const source = readFileSync(new URL("./snippet.js", import.meta.url), "utf8");
   const url = "data:text/javascript;base64," +
-    Buffer.from(source.replace(/^export const [^\n]*\n/gm, "")).toString("base64");
+    Buffer.from(source.replace(/^export const [^\n]*;\n/gm, "")).toString("base64");
   return import(url);
 }
 

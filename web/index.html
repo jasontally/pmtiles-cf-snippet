@@ -676,15 +676,15 @@ console.log(tile.data.byteLength);</code></pre>
       it, host your own copy of the tiles or buy a supported plan from someone.
     </li>
     <li>
-      <strong>It is never current to the hour.</strong> The copy is rebuilt weekly
+      <strong>It is never current to the hour.</strong> The copy is rebuilt monthly
       from the newest Protomaps Basemap release, so OpenStreetMap edits made this
-      week are not in it yet. Expect a delay of a few days to a week or more behind
+      month are not in it yet. Expect a delay of a few days to a month or more behind
       OpenStreetMap.
     </li>
     <li>
       <strong>No whole-file download.</strong> Requests are answered in ranges of at
       most 512&nbsp;KiB, which is all a PMTiles client ever asks for. Asking for the
-      whole 118&nbsp;GiB in one request returns <code>416</code>, which is correct.
+      whole 129&nbsp;GiB in one request returns <code>416</code>, which is correct.
     </li>
     <li>
       <strong>Attribution is required.</strong> The tiles are derived from
