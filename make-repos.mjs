@@ -87,7 +87,7 @@ function preflight() {
 }
 
 /** Copy the template into a fresh directory with the Worker name filled in. */
-function stage(index) {
+function stage(index, archiveJson = null) {
   const dir = mkdtempSync(join(tmpdir(), `shard-${index}-`));
   cpSync(TEMPLATE, dir, { recursive: true });
   // The template is copied whole, then the per shard workflow is written over it.
@@ -98,6 +98,12 @@ function stage(index) {
   const worker = workerName(index);
   const config = join(dir, "wrangler.jsonc");
   writeFileSync(config, readFileSync(config, "utf8").replace("SHARD_WORKER_NAME", worker));
+
+  // The archive a shard holds is the shard's own state, and the refresh workflow
+  // owns it. The template holds the seed, so pushing the template over a
+  // refreshed shard puts it back to the seed archive, and the build then serves
+  // the old data. An existing repo keeps its own archive.json.
+  if (archiveJson) writeFileSync(join(dir, "archive.json"), archiveJson);
 
   const pkg = join(dir, "package.json");
   writeFileSync(
@@ -134,6 +140,25 @@ function stage(index) {
  * the 20261010 archive and 5,544 for 20261017.
  */
 const PARTS_PER_SHARD = 5544;
+
+/**
+ * The archive.json a repo holds, or null if it has none.
+ *
+ * It is the shard's own state, and the refresh workflow owns it. A template
+ * push must not put the seed back.
+ */
+function currentArchiveJson(owner, repo) {
+  const result = spawnSync("gh", ["api", `repos/${owner}/${repo}/contents/archive.json`], {
+    encoding: "utf8",
+  });
+  if (result.status !== 0) return null;
+  try {
+    const doc = JSON.parse(result.stdout);
+    return Buffer.from(doc.content, "base64").toString("utf8");
+  } catch {
+    return null;
+  }
+}
 
 function readmeFor(index, worker) {
   const first = index * PARTS_PER_SHARD;
@@ -217,15 +242,14 @@ function main() {
 
   for (let i = 0; i < SHARD_COUNT; i++) {
     const repo = repoName(i);
-    const dir = stage(i);
+    const exists = spawnSync("gh", ["repo", "view", `${owner}/${repo}`], {
+      encoding: "utf8",
+    }).status === 0;
+    const dir = stage(i, exists ? currentArchiveJson(owner, repo) : null);
 
     try {
       // A repo that already exists is updated, so re-running is safe and picks
       // up template fixes.
-      const exists = spawnSync("gh", ["repo", "view", `${owner}/${repo}`], {
-        encoding: "utf8",
-      }).status === 0;
-
       // Created from the staged directory, and without --source or --remote.
       // --source=. would use this repo's directory, and --remote=origin would
       // collide with the remote that already exists here.
