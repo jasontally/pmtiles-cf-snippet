@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PartExtractor, groupRuns, shardParts } from "./build.mjs";
+import { PartExtractor, downloadRun, groupRuns, shardParts } from "./build.mjs";
 
 let passed = 0;
 let failed = 0;
@@ -366,6 +366,96 @@ await check("complete reports whether every part was written", async () => {
     await extractor.consume(half());
     assert.ok(sent > 0, "nothing was sent");
     assert.equal(extractor.complete, false, "a truncated stream must not report complete");
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+// A download that dies half way, and one that crawls, must both end with the
+// same bytes as a clean download. These are the two ways a shard build failed
+// on 18 October 2026.
+function rangeFetch(archive, { dieAfter = null } = {}) {
+  const calls = [];
+  const fetchImpl = async (url, init) => {
+    const range = /bytes=(\d+)-(\d+)/.exec(init.headers.Range);
+    const from = Number(range[1]);
+    const to = Number(range[2]);
+    calls.push({ from, to });
+    const limit = dieAfter === null ? to + 1 - from : Math.min(dieAfter, to + 1 - from);
+    const dies = dieAfter !== null && dieAfter < to + 1 - from;
+    let sent = 0;
+    const body = new ReadableStream({
+      pull(controller) {
+        if (sent >= limit) {
+          // The bytes are delivered first, then the connection breaks. Erroring
+          // first would discard the queue, and the test would prove nothing.
+          if (dies) controller.error(new Error("the connection was terminated"));
+          else controller.close();
+          return;
+        }
+        const stop = Math.min(from + limit, to + 1);
+        const chunk = archive.bytes.subarray(from + sent, Math.min(from + sent + 16_384, stop));
+        sent += chunk.length;
+        controller.enqueue(chunk);
+      },
+    });
+    return new Response(body, {
+      status: 206,
+      headers: { "Content-Range": `bytes ${from}-${to}/${archive.total}` },
+    });
+  };
+  return { fetchImpl, calls };
+}
+
+await check("a download that dies half way is resumed, not restarted", async () => {
+  const archive = makeArchive(SMALL);
+  const { parts } = planFor(archive, 1, 3);
+  const run = { start: parts[0].start, end: parts.at(-1).start + parts.at(-1).length, parts };
+  const outDir = mkdtempSync(join(tmpdir(), "shard-retry-"));
+  try {
+    // The first attempt stops after 60,000 bytes. The next one must start
+    // there, not at the beginning.
+    const { fetchImpl, calls } = rangeFetch(archive, { dieAfter: 60_000 });
+    const extractor = await downloadRun("https://example.test/archive", run, outDir, {
+      fetchImpl,
+      minRate: 1,
+      graceSeconds: 0,
+      maxAttempts: 10,
+    });
+    assert.ok(extractor.complete, "the extractor did not finish");
+    assert.ok(calls.length >= 2, `expected more than one attempt, got ${calls.length}`);
+    assert.ok(calls[1].from > calls[0].from, "the retry did not resume where it stopped");
+    const written = readTree(outDir);
+    assert.equal(Object.keys(written).length, parts.length);
+    for (const part of parts) {
+      assert.ok(
+        written[part.name].equals(
+          Buffer.from(archive.bytes.subarray(part.start, part.start + part.length))
+        ),
+        `${part.name} does not match the source after the retry`
+      );
+    }
+  } finally {
+    rmSync(outDir, { recursive: true, force: true });
+  }
+});
+
+await check("a download that never finishes is given up on", async () => {
+  const archive = makeArchive(SMALL);
+  const { parts } = planFor(archive, 1, 3);
+  const run = { start: parts[0].start, end: parts.at(-1).start + parts.at(-1).length, parts };
+  const outDir = mkdtempSync(join(tmpdir(), "shard-giveup-"));
+  try {
+    const { fetchImpl } = rangeFetch(archive, { dieAfter: 1000 });
+    await assert.rejects(
+      () => downloadRun("https://example.test/archive", run, outDir, {
+        fetchImpl,
+        minRate: 1,
+        graceSeconds: 0,
+        maxAttempts: 2,
+      }),
+      /gave up after 2 attempts/
+    );
   } finally {
     rmSync(outDir, { recursive: true, force: true });
   }

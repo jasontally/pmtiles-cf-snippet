@@ -23,7 +23,7 @@
  */
 
 import { spawnSync } from "node:child_process";
-import { workflowFor, slotFor } from "./shard-repo/render-workflow.mjs";
+import { verifyFor, workflowFor, slotFor } from "./shard-repo/render-workflow.mjs";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
@@ -111,13 +111,17 @@ function stage(index) {
   const readme = join(dir, "README.md");
   writeFileSync(readme, readmeFor(index, worker));
 
-  // The refresh workflow, with this shard's half hour slot. It lives in the shard
-  // repo rather than in this one so the refresh needs no credential: a workflow
-  // that pushed to 13 other repos would need a personal access token stored in
+  // The refresh workflow, with this shard's slot. It lives in the shard repo
+  // rather than in this one so the refresh needs no credential: a workflow
+  // that pushed to 25 other repos would need a personal access token stored in
   // GitHub, which is the thing this design exists to avoid.
   const workflow = join(dir, ".github", "workflows", "refresh.yml");
   mkdirSync(join(dir, ".github", "workflows"), { recursive: true });
   writeFileSync(workflow, workflowFor(index));
+
+  // The verify workflow, which checks this shard and starts the build again if
+  // the last build did not finish. It needs no credential either.
+  writeFileSync(join(dir, ".github", "workflows", "verify.yml"), verifyFor(index));
 
   return dir;
 }

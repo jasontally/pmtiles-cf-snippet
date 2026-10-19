@@ -52,7 +52,7 @@ function fail(message) {
 }
 
 /** The 127 byte PMTiles v3 header. */
-function parseHeader(bytes) {
+export function parseHeader(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const u64 = (off) => Number(view.getBigUint64(off, true));
   if (String.fromCharCode(...bytes.slice(0, 7)) !== "PMTiles") {
@@ -257,12 +257,18 @@ export class PartExtractor {
     this.open.clear();
   }
 
-  /** Pull the whole stream through. */
-  async consume(iterable) {
+  /**
+   * Pull the whole stream through.
+   *
+   * The files stay open unless the caller says otherwise. A download that stops
+   * half way has to be able to carry on, and a closed file is reopened for
+   * writing, which truncates the bytes already written.
+   */
+  async consume(iterable, { close = true } = {}) {
     for await (const chunk of iterable) {
       await this.push(Buffer.from(chunk));
     }
-    await this.close();
+    if (close) await this.close();
     return this;
   }
 
@@ -270,6 +276,93 @@ export class PartExtractor {
   get complete() {
     return this.index >= this.parts.length;
   }
+}
+
+/** An error that another attempt cannot fix. */
+class FatalError extends Error {}
+
+/**
+ * Download one run of parts, and survive a connection that dies or crawls.
+ *
+ * The build has 30 minutes. One 5.5 GB request takes 58 seconds at the 95 MB/s
+ * that a build alone gets, but on 18 October two of 25 builds got 4 MB/s and
+ * spent 23 minutes on the same download. Both were killed, and both shards kept
+ * the old archive until a person noticed a day later.
+ *
+ * So the request carries a deadline. When the rate falls under the floor the
+ * request is abandoned and a new one starts from the byte the last one reached.
+ * The part files are appended to, so the bytes already written are kept and
+ * the transfer does not start over.
+ */
+export async function downloadRun(url, run, outDir, options = {}) {
+  const {
+    minRate = 8_000_000,
+    graceSeconds = 45,
+    maxAttempts = 6,
+    fetchImpl = fetch,
+    onAttempt = () => {},
+  } = options;
+
+  const extractor = new PartExtractor(run.parts, outDir, run.start);
+  let attempt = 0;
+
+  try {
+    while (!extractor.complete) {
+      attempt++;
+      if (attempt > maxAttempts) {
+        const missing = run.parts[Math.min(extractor.index, run.parts.length - 1)];
+        throw new Error(
+          `the download gave up after ${maxAttempts} attempts, at byte ` +
+          `${extractor.position.toLocaleString()}. The part ${missing.name} is not written.`
+        );
+      }
+
+      const from = extractor.position;
+      const controller = new AbortController();
+      const started = Date.now();
+      let lastAt = { position: from, time: started };
+      const timer = setInterval(() => {
+        const now = Date.now();
+        const got = extractor.position - lastAt.position;
+        const seconds = (now - lastAt.time) / 1000;
+        lastAt = { position: extractor.position, time: now };
+        if (seconds < 1) return;
+        if ((now - started) / 1000 < graceSeconds) return;
+        if (got / seconds < minRate) {
+          controller.abort(new Error(`the rate fell under ${minRate} bytes per second`));
+        }
+      }, 10_000);
+
+      try {
+        const response = await fetchImpl(url, {
+          headers: { Range: `bytes=${from}-${run.end - 1}` },
+          signal: controller.signal,
+        });
+        if (response.status !== 206) {
+          throw new FatalError(`the source returned ${response.status} for a Range request`);
+        }
+        if (!response.body) throw new Error("the download had no body");
+        await extractor.consume(Readable.fromWeb(response.body), { close: false });
+      } catch (error) {
+        onAttempt({
+          attempt,
+          seconds: ((Date.now() - started) / 1000).toFixed(0),
+          from,
+          to: extractor.position,
+          error,
+        });
+        if (error instanceof FatalError) throw error;
+      } finally {
+        clearInterval(timer);
+      }
+    }
+  } finally {
+    // The files must be closed on every path. An open write stream keeps the
+    // process alive, and a build that gives up must still end.
+    await extractor.close();
+  }
+
+  return extractor;
 }
 
 /**
@@ -399,23 +492,14 @@ async function main() {
   let written = 0;
 
   for (const run of runs) {
-    const response = await fetch(url, {
-      headers: { Range: `bytes=${run.start}-${run.end - 1}` },
+    const extractor = await downloadRun(url, run, outDir, {
+      onAttempt: ({ attempt, seconds, to, error }) => {
+        console.log(
+          `  attempt ${attempt} stopped after ${seconds}s at byte ` +
+          `${to.toLocaleString()}: ${error.message}`
+        );
+      },
     });
-    if (response.status !== 206) fail(`download returned ${response.status}`);
-    if (!response.body) fail("download had no body");
-
-    const extractor = new PartExtractor(run.parts, outDir, run.start);
-    await extractor.consume(Readable.fromWeb(response.body));
-
-    if (!extractor.complete) {
-      const missing = run.parts[extractor.index];
-      fail(
-        `the download ended before ${missing.name}. ` +
-        `Got ${extractor.written.toLocaleString()} of ` +
-        `${(run.end - run.start).toLocaleString()} bytes for this run.`
-      );
-    }
     written += extractor.written;
   }
 

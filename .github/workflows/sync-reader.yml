@@ -7,14 +7,17 @@ name: Sync reader offsets
 # HTTP from shard 0, which serves assets without a token. Only this repo's build,
 # on Cloudflare, ever holds one.
 #
-# It runs three times on Sunday and once on Monday. It is safe to run often and
-# often wrong: until shard 0 has been rebuilt the header is still the old one, the
-# offsets still agree, and this correctly does nothing. The Monday run is there
-# for a shard 0 that built slowly on Sunday.
+# It runs twice on Sunday and once on Monday. The first Sunday run is right
+# after the shard refresh finishes, so the reader is published while the change
+# is still fresh. It is safe to run often and often wrong: until shard 0 has
+# been rebuilt the header is still the old one, the offsets still agree, and
+# this correctly does nothing. The later runs are for a shard 0 that built
+# slowly, or a Sunday where the schedule ran late.
 "on":
   schedule:
-    - cron: '7 4 1-7 * 0'
+    - cron: '50 2 1-7 * 0'
     - cron: '7 7 1-7 * 0'
+    - cron: '7 4 1-7 * 1'
   workflow_dispatch: {}
 
 permissions:

@@ -64,15 +64,15 @@ longest is the safe one:
 **00:16 to 07:34 UTC is the only window that has never contained a release.**
 It is also the only gap long enough for the refresh.
 
-Six and a half hours fits 13 slots at 30 minutes, which is exactly the number of
-shards. That is the whole reason for the 30 minute interval and the 6 to 7 hour
+Six and a half hours fits 25 slots at 4 minutes, which is exactly the number of
+shards. That is the whole reason for the 4 minute interval and the 6 to 7 hour
 window.
 
-Chosen: **Sunday, 00:30 to 07:30 UTC**. That is 14 half hour slots: twelve
-refresh shards 1 to 12, one refreshes shard 0 at 06:30, and the last updates the
-reader at 07:00. Sunday because it is tied quietest by weekday with Saturday, one
-release in 159 weeks, and that one was at 08:52 UTC, well clear of the window. As
-local time this is Saturday evening to Sunday early morning in the Americas.
+Chosen: **Sunday, 00:30 to 02:10 UTC**, 25 slots of 4 minutes, and the reader
+follows at 02:50. Sunday because it is tied quietest by weekday with Saturday,
+one release in 159 weeks, and that one was at 08:52 UTC, well clear of the
+window. As local time this is Saturday evening to Sunday early morning in the
+Americas.
 
 The window gates **starting a shard build**. Updating the reader is not gated,
 because it reads the header from our own shard 0 rather than from Protomaps, so
@@ -90,37 +90,35 @@ There are no credentials anywhere in this part of the system. No GitHub repo hol
 a Cloudflare token, and no workflow reads a secret. That is a deliberate design
 choice, and it is what the rest of this section explains.
 
-### One workflow per shard repo, not one workflow for all 13
+### One workflow per shard repo, not one workflow for all 25
 
-Each of the 13 shard repos has its own `.github/workflows/refresh.yml`, with a cron
-staggered by half an hour so only one shard builds at a time:
+Each of the 25 shard repos has its own `.github/workflows/refresh.yml`, with a cron
+four minutes after the one before it, so the builds do not all start together:
 
 | Slot (UTC, Sunday) | Shard |
 |---|---|
 | 00:30 | 01 |
-| 01:00 | 02 |
-| 01:30 | 03 |
-| 02:00 | 04 |
-| 02:30 | 05 |
-| 03:00 | 06 |
-| 03:30 | 07 |
-| 04:00 | 08 |
-| 04:30 | 09 |
-| 05:00 | 10 |
-| 05:30 | 11 |
-| 06:00 | 12 |
-| 06:30 | 00 |
+| 00:34 | 02 |
+| 00:38 | 03 |
+| ... | ... |
+| 02:02 | 24 |
+| 02:06 | 00 |
 
 Shard 0 goes last on purpose. It holds `head.bin`, and the reader takes the
-archive layout from it. Leaving it on the old archive until the end keeps clients
-on a consistent layout for as long as possible.
+archive layout from it. The reader's offsets must not change before the other
+shards hold the new archive, because a reader that points at a new archive
+while the shards still hold the old one finds no tiles at all.
 
-Thirteen separate crons are the price of holding no key. A single workflow in this
-repo that pushed to 13 other repos would need a personal access token with write
-access to all of them, stored in GitHub. Thirteen workflows, each committing to its
-own repo with the automatic `GITHUB_TOKEN`, need nothing stored anywhere. The
-alternative also fails harder: a PAT in a repo is a credential that can leak, and
-this one would be in 13 places.
+The reader's own workflow runs at 02:50, right after the last shard starts, and
+again at 07:07 and on Monday at 04:07. The later runs are for a shard 0 that
+built slowly, or a Sunday where the schedule ran late.
+
+Twenty-five separate crons are the price of holding no key. A single workflow in
+this repo that pushed to 25 other repos would need a personal access token with
+write access to all of them, stored in GitHub. Twenty-five workflows, each
+committing to its own repo with the automatic `GITHUB_TOKEN`, need nothing stored
+anywhere. The alternative also fails harder: a PAT in a repo is a credential that
+can leak, and this one would be in 25 places.
 
 ### The commit is the trigger
 
@@ -137,9 +135,9 @@ token disappears. `wire-shards.mjs` deletes any `ARCHIVE_URL` variable it finds,
 because one left in place would outrank the file on every build: the workflow
 would commit the new key and the build would then fetch the old archive, silently.
 
-### How 13 repos agree on one build, with no shared state
+### How 25 repos agree on one build, with no shared state
 
-Each repo computes its target independently. "The newest build" would give 13
+Each repo computes its target independently. "The newest build" would give 25
 different answers if a Protomaps build landed partway through the window and some
 shards had already run. Half the shards would then hold one archive and half
 another, and the reader could not tell which is which.
@@ -152,7 +150,7 @@ Every repo computes the same anchor, so every repo computes the same target,
 whatever minute of the window it fires at. A build that appears mid-window is
 ignored until the following week. There is no state file, no coordination, and no
 ordering to get wrong. `shard-repo/refresh.test.mjs` checks this directly by
-running the rule at all 13 slot times and asserting one answer.
+running the rule at all 25 slot times and asserting one answer.
 
 There is a second rule underneath it: a build must be at least 4 hours old before
 we cut parts from it. Protomaps lists a build before it has finished writing it,
@@ -163,14 +161,15 @@ second line of defence, and the script refuses rather than proceeding if it fail
 ### Most months nothing happens
 
 If the target equals what the shard already holds, `refresh.mjs` reports no change
-and makes no commit, so no build runs and nothing uploads. A refresh is 13 builds
-and 126 GB, so skipping it on a week when Protomaps has not published is the point
-rather than a side effect. `workflow_dispatch` with `force: true` rebuilds anyway.
+and makes no commit, so no build runs and nothing uploads. A refresh is 25 builds
+and 138 GB, so skipping it on a month when Protomaps has not published is the
+point rather than a side effect. `workflow_dispatch` with `force: true` rebuilds
+anyway.
 
 ### The reader follows afterwards
 
-`.github/workflows/sync-reader.yml` in this repo runs three times on Sunday and
-once on Monday, and calls `tools/sync-reader.mjs`. It reads `head.bin` from shard 0
+`.github/workflows/sync-reader.yml` in this repo runs twice on Sunday and once on
+Monday, and calls `tools/sync-reader.mjs`. It reads `head.bin` from shard 0
 over plain HTTP and compares the offsets the reader holds. If they differ it
 rewrites them in `snippet.js` and commits, and this repo's build deploys the
 Snippet.
@@ -181,8 +180,8 @@ never ran all leave it correct, because there is nothing to remember.
 
 It also cannot run too early. Until shard 0 has been rebuilt it still serves the
 old header, the offsets still agree, and the script correctly does nothing. That
-makes it safe to run often and often wrong. The Monday run is there for a shard 0
-that built slowly on Sunday.
+makes it safe to run often and often wrong. The later runs are there for a shard
+0 that built slowly, or a Sunday where the schedule ran late.
 
 ### Holding builds while the template is pushed
 
@@ -190,55 +189,98 @@ that built slowly on Sunday.
 so a push to `main` starts no build. `--release` puts `main` back. There is no
 pause endpoint in the Builds API, and the branch list is the only lever available.
 
-This matters because 13 concurrent builds saturate the upload. One build was
-terminated at 31 minutes when six ran together, against a 30 minute ceiling, so a
-template push goes out while builds are held and the next real build is triggered
-deliberately.
+This matters because a template push to 25 repos starts 25 builds, and one of
+them was terminated at 31 minutes when six ran together, against a 30 minute
+ceiling. So a template push goes out while builds are held and the next real
+build is triggered deliberately.
 
 ## Builds get longer as the archive grows
 
-Upload cost is 90 s per GB plus 0.055 s per file. The archive is now 138.7 GB, not
+Upload cost is 90 s per GB plus 0.055 s per file. The archive is now 138.9 GB, not
 the 118 GiB it was when the shard count was chosen, so a shard build is about
-10.5 GB and roughly 7,300 files.
+5.5 GB and 5,544 files.
 
-That puts a single build near 25 minutes. One of 22 builds was terminated at 31
-minutes when six ran together, so the margin is thin and it will get thinner. This
-is the strongest argument yet for the two generation layout below: refreshing half
-the Workers a week halves the bytes in each build.
+Measured on 19 October 2026, with one build at a time, a shard build takes 8 to
+15 minutes. The download is 5.54 GB and runs at 17 to 95 MB/s. The upload is
+5,544 files and takes 2 to 11 minutes, because Cloudflare skips the files whose
+content hash it already holds.
+
+## What the failures on 18 October 2026 were
+
+Three of 25 shards failed, and the shards they held stayed on the old archive
+until a person noticed a day later. The build logs say why:
+
+| Shard | Queued for | Ran for | Result |
+|---|---|---|---|
+| 16 | 28 min | 31 min | killed at 3,525 of 5,544 files uploaded |
+| 23 | 17 min | 31 min | killed during the download |
+| 24 | 21 min | 7 min | the download connection dropped |
+
+The queue was long because the account runs 6 builds at a time and all 25
+started within 4 minutes of each other. The kill was at 30 minutes, which is
+the limit on the build command, and the account allows 6,000 build minutes a
+month, so the minutes were never the constraint.
+
+The download was the real problem. Two builds got 4 MB/s where the others got
+64 to 95 MB/s at the same time, so it was a slow connection and not a busy
+origin. One build alone got 17 MB/s and the next got 59. The rate is not
+predictable.
+
+Three things answer that, and they are in the shard template now:
+
+1. The download carries a deadline. When the rate falls under 8 MB/s the request
+   is abandoned and a new one starts from the byte the last one reached. The
+   part files are appended to, so the bytes already written are kept.
+2. The crons are staggered by four minutes, so the builds do not all start at
+   once and the queue stays short.
+3. Each shard repo has a verify workflow that checks the shard after the
+   refresh, and starts the build again when the check fails. The check asks the
+   shard for the last part of the range it should own, because a shard that
+   still holds the old archive has no such part. It holds no credential, and
+   the commit is what starts the build.
+
+The third one is the important one. The first two make a failure less likely.
+The third one makes a failure cost minutes instead of a day.
 
 ## The transitional window, stated plainly
 
 Between the first shard refreshing and the reader being updated, the shards hold
-two different archives at once. A tile request for a refreshed shard is answered
-from the new archive, and it returns a valid tile, but not always the tile the
-client asked for.
+two different archives at once. The reader is where that shows. Its byte offsets
+name the parts, and the mapping from a part number to a shard changes when the
+archive grows, because the parts per shard grow with it. A reader that still
+has the old offsets asks a shard for a part that shard no longer holds, and the
+answer is a 404 that reaches the client as a 502.
 
-It is not corruption and not a blank map. Tile parts are cut at the same 2,000,000
-byte boundaries in both archives, and tile data starts at byte 16,384 in both, so
-the reader computes the same part number and the same offset within the part for a
-given archive offset. It reads a different tile only where the data between the two
-builds actually changed.
+So the window is not a mix of old and new tiles. It is a map with holes, and the
+holes sit where the refreshed shards are. The window ends when the reader is
+published with the new offsets, which is why shard 0 goes last: until then the
+reader and shard 0 still agree, and the reader serves the old archive for the
+shards that still hold it.
 
-The window is roughly six hours. Two ways to remove it:
+The two generation layout below is the only way to remove the window. With it
+the new archive is built into a second set of Workers, the reader is flipped
+once, and the first set is rebuilt afterwards. The window becomes one reader
+change.
 
-- **Two generations.** Build the new archive into a second set of 13 Workers
+The window is roughly two hours. Two ways to remove it:
+
+- **Two generations.** Build the new archive into a second set of 25 Workers
   while the first set keeps serving, flip the reader, then rebuild the first set
-  for the following week. Correct with no window, at the cost of 13 more Workers,
-  13 more hostnames, and a host table of 26 in the reader. The same 13 repos can
+  for the following week. Correct with no window, at the cost of 25 more Workers,
+  25 more hostnames, and a host table of 50 in the reader. The same 25 repos can
   deploy to two Workers each by running `wrangler deploy` twice with different
   config files.
-- **Shorter window.** Run 3 shards at a time instead of one. Four batches of about
-  22 minutes is about an hour and a half instead of six, but concurrent builds
-  slow each other down, and one of 22 builds was killed at 31 minutes when six
-  ran together.
+- **Shorter window.** Run the shards in batches instead of one at a time. The
+  batches overlap, and one of 25 builds was killed at 31 minutes when six ran
+  together.
 
-Neither is built. The current setup uses the one-shard-per-slot window because it
-is the one that will not kill builds.
+Neither is built. The current setup uses one shard per slot because it is the one
+that will not kill builds.
 
-The one-shard-per-slot schedule is not only a bandwidth decision. Each shard's slot
+The one shard per slot schedule is not only a bandwidth decision. Each shard's slot
 is also its own workflow's cron, so the staggering falls out of the credential-free
 design rather than being added on top of it. The two generation layout would need
-13 more Workers and would keep the same 13 workflows.
+25 more Workers and would keep the same 25 workflows.
 
 ## What is not stored anywhere
 
@@ -246,7 +288,7 @@ No credential is involved in a refresh, at any stage:
 
 | Where | What it holds | Why it is safe |
 |---|---|---|
-| 13 shard repos | nothing | the workflows commit with `GITHUB_TOKEN`, which GitHub issues per run |
+| 25 shard repos | nothing | the workflows commit with `GITHUB_TOKEN`, which GitHub issues per run |
 | this repo | nothing | `sync-reader.yml` reads a public header over plain HTTP |
 | Cloudflare build | `CLOUDFLARE_API_TOKEN` | Cloudflare injects it into the build itself |
 | `wire-shards.mjs` | the token, from the environment | it is run by a person, never by a schedule |
