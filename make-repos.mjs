@@ -126,13 +126,22 @@ function stage(index) {
   return dir;
 }
 
+/**
+ * The tile parts each shard holds, for the README and the commit message.
+ *
+ * It grows with the archive: the parts per shard are the total parts over the
+ * shard count, and the total parts grow as the archive grows. It was 5,537 for
+ * the 20261010 archive and 5,544 for 20261017.
+ */
+const PARTS_PER_SHARD = 5544;
+
 function readmeFor(index, worker) {
-  const first = index * 5537;
-  const last = (index + 1) * 5537 - 1;
+  const first = index * PARTS_PER_SHARD;
+  const last = (index + 1) * PARTS_PER_SHARD - 1;
   return `# ${repoName(index)}
 
-One shard of the Protomaps basemap. The archive is 118 GiB and a Workers
-Builds container has 20 GB of disk, so the archive is split across 13 of these
+One shard of the Protomaps basemap. The archive is 129 GiB and a Workers
+Builds container has 20 GB of disk, so the archive is split across 25 of these
 repos. This one holds shard ${index}, tile parts ${first} to ${last}.
 
 Shard 0 also holds \`head.bin\`, \`meta.bin\`, and the leaf directories, which
@@ -195,7 +204,7 @@ function main() {
     for (let i = 0; i < SHARD_COUNT; i++) {
       console.log(
         `${String(i).padEnd(6)}${repoName(i).padEnd(20)}${workerName(i).padEnd(20)}` +
-        `${i * 5537}..${(i + 1) * 5537 - 1}`
+        `${i * PARTS_PER_SHARD}..${(i + 1) * PARTS_PER_SHARD - 1}`
       );
     }
     console.log("\n--dry-run: nothing was created.");
@@ -242,7 +251,7 @@ function main() {
       git(["-c", "user.name=Jason Tally",
         "-c", "user.email=719178+jasontally@users.noreply.github.com",
         "commit", "-q", "-F", "-"], {
-        input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * 5537} to ${(i + 1) * 5537 - 1}.\n${
+        input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * PARTS_PER_SHARD} to ${(i + 1) * PARTS_PER_SHARD - 1}.\n${
           i === 0
             ? "\nAlso holds head.bin, meta.bin, and the leaf directories, which\ntogether are 324.9 MB.\n"
             : ""
