@@ -15,7 +15,7 @@
  * 150,036 bytes. A tile is usually about 200 bytes.
  *
  * WHY 25 HOSTS
- * The archive is 138,941,094,895 bytes, 129 GiB. A Workers Builds container has
+ * The archive is about 140 GB. A Workers Builds container has
  * 20 GB of disk and about 30 usable minutes, so no single build can hold or
  * upload it. The archive is therefore split across 25 Workers, each with its own
  * repo, build, and hostname s.tiles0..s.tiles24.jasontally.com.

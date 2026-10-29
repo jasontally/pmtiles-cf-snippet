@@ -66,7 +66,7 @@ export function workflowFor(index) {
 # Most Sundays this makes no commit, because the newest eligible Protomaps build
 # has not changed, and a no-commit run costs no build minutes and uploads no
 # data. Skipping the commit is the point, not a side effect: a refresh is 25
-# builds and 138 GB of upload.
+# builds and about 140 GB of upload.
 on:
   schedule:
     - cron: '${slot.cron}'

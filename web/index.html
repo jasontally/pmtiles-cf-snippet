@@ -880,7 +880,7 @@ console.log(tile.data.byteLength);</code></pre>
     <li>
       <strong>No whole-file download.</strong> Requests are answered in ranges of at
       most 512&nbsp;KiB, which is all a PMTiles client ever asks for. Asking for the
-      whole 129&nbsp;GiB in one request returns <code>416</code>, which is correct.
+      whole archive in one request returns <code>416</code>, which is correct.
     </li>
     <li>
       <strong>Attribution is required.</strong> The tiles are derived from

@@ -118,7 +118,7 @@ export function shardSource(name, reader, fetchImpl = fetch) {
  * Read the archive from a file, or from a URL that answers range requests.
  *
  * A build that holds the archive reads the file. Only the bytes asked for are
- * read: the archive is 138 GB and the generator needs a few hundred KB of it.
+ * read: the archive is about 140 GB and the generator needs a few hundred KB of it.
  */
 export function archiveSource(path, fetchImpl = fetch) {
   if (/^https?:\/\//.test(path)) {

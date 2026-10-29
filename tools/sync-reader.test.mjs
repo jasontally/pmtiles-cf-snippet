@@ -7,8 +7,10 @@
  * the short sections a real archive has, and the rewritten entry is checked to be
  * byte identical to what is already there.
  *
- * Nothing here needs a credential. The live check needs the network, and says so
- * when it is skipped.
+ * Nothing here needs a credential. The live checks need the network, and say so
+ * when they are skipped. They compare the live header with the live shards, not
+ * with this checkout, so a shard refresh that lands ahead of the next `npm run
+ * sync` does not fail them.
  */
 
 import assert from "node:assert/strict";
@@ -189,30 +191,68 @@ await check("the plan run never writes", () => {
   assert.equal(readFileSync(join(ROOT, "snippet.js"), "utf8"), before, "the plan run wrote");
 });
 
-// The live check needs the network, which is the point: this tool's whole job is
-// to compare against what the shards actually serve.
+// The live checks compare the live header with the live shards. They do not look
+// at snippet.js, and that is deliberate: the 25 shard repos refresh on their own
+// schedule, so a checkout can be a commit behind and still be correct. Failing a
+// test for that punished every clone for the shards moving, which is not a fault
+// in the clone. `npm run sync` updates the entry, and the sync workflow runs it
+// after each refresh; this file tests the reading, not the record.
 try {
-  const out = execFileSync(process.execPath, [join(HERE, "sync-reader.mjs"), "--plan"], {
-    encoding: "utf8",
-    timeout: 120000,
-  });
-  await check("against the live archive, the reader already agrees", () => {
-    assert.ok(out.includes("already matches"), out.slice(0, 400));
+  const layout = await readLayout();
+
+  await check("the live header fits the shard count", () => {
+    assert.equal(
+      layout.tilePartsPerShard,
+      Math.ceil(layout.tileParts / SHARD_COUNT),
+      "the live header implies a different parts-per-shard"
+    );
+    assert.ok(
+      layout.tileParts <= layout.tilePartsPerShard * SHARD_COUNT,
+      `${layout.tileParts} tile parts do not fit ${SHARD_COUNT} shards of ${layout.tilePartsPerShard}`
+    );
+    assert.ok(
+      layout.tileParts > (SHARD_COUNT - 1) * layout.tilePartsPerShard,
+      "the last shard would hold no parts, so parts-per-shard is too large"
+    );
   });
 
-  // The strongest check available: render the entry from the live header and
-  // compare with snippet.js as committed. Any drift shows up as a rewrite the
-  // sync would otherwise make on every run. This one reads the live header
-  // rather than a fixture, so it stays true when the archive changes.
-  await check("snippet.js holds what the live archive implies", async () => {
-    const layout = await readLayout();
-    const source = readFileSync(join(ROOT, "snippet.js"), "utf8");
-    const existing = currentEntry(source);
-    assert.ok(existing, "no basemap entry in snippet.js");
-    assert.equal(
-      existing.trim(),
-      entryFor(layout).trim(),
-      "snippet.js does not hold what the archive layout implies"
+  await check("the live shards serve the parts the header implies", async () => {
+    // Parts are named by their global index, and the shard is that index divided
+    // by the parts-per-shard the header states. If the header and the files
+    // disagree, this is where it shows, with no checkout involved.
+    const urlFor = (index) =>
+      `https://s.tiles${Math.floor(index / layout.tilePartsPerShard)}.jasontally.com` +
+      `/s/basemap/tile/${String(index).padStart(6, "0")}.bin`;
+    const last = layout.tileParts - 1;
+    const start = await fetch(urlFor(0), { method: "HEAD" });
+    assert.equal(start.status, 200, `the first tile part returned ${start.status}`);
+    const end = await fetch(urlFor(last), { method: "HEAD" });
+    assert.equal(end.status, 200, `the last tile part (${last}) returned ${end.status}`);
+    // One past the end must be absent. If it exists, the header undercounts the
+    // tile section and the reader is routing parts that are not in its table.
+    const past = await fetch(urlFor(layout.tileParts), { method: "HEAD" });
+    assert.equal(past.status, 404, `part ${layout.tileParts} exists, so the header is short`);
+  });
+
+  await check("the tool reads the same live header", () => {
+    const out = execFileSync(process.execPath, [join(HERE, "sync-reader.mjs"), "--plan"], {
+      encoding: "utf8",
+      timeout: 120000,
+    });
+    const thousands = (n) => n.toLocaleString("en-US");
+    // Both branches must name the live numbers: either the entry it would write,
+    // or the one that already matches.
+    assert.ok(
+      out.includes(`serves ${thousands(layout.total)} bytes`),
+      "the tool read a different total"
+    );
+    assert.ok(
+      out.includes(`${thousands(layout.tilePartsPerShard)} parts each`),
+      "the tool read a different parts-per-shard"
+    );
+    assert.ok(
+      /already matches|should be basemap:/.test(out),
+      "the tool did not report a comparison"
     );
   });
 } catch (error) {

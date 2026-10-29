@@ -76,7 +76,7 @@ morning in the Americas.
 
 The **first Sunday of the month**, not every Sunday, because a new archive
 invalidates the cached parts on the CDN and in every browser that has them, and a
-rebuild is 25 builds and 138 GB of upload. Monthly is the cadence the service
+rebuild is 25 builds and about 140 GB of upload. Monthly is the cadence the service
 publishes. Later Sundays still run the refresh decision and recompute the same
 target: a shard that holds it does nothing, and a shard that missed its build on
 the first Sunday tries again. That is a retry, not new data.
@@ -170,7 +170,7 @@ second line of defence, and the script refuses rather than proceeding if it fail
 
 If the target equals what the shard already holds, `refresh.mjs` reports no change
 and makes no commit, so no build runs and nothing uploads. That is every Sunday
-except the first, in a normal month. A refresh is 25 builds and 138 GB, so
+except the first, in a normal month. A refresh is 25 builds and about 140 GB, so
 skipping it when the target has not moved is the point rather than a side effect.
 `workflow_dispatch` with `force: true` rebuilds anyway.
 

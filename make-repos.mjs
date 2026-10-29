@@ -165,7 +165,7 @@ function readmeFor(index, worker) {
   const last = (index + 1) * PARTS_PER_SHARD - 1;
   return `# ${repoName(index)}
 
-One shard of the Protomaps basemap. The archive is 129 GiB and a Workers
+One shard of the Protomaps basemap. The archive is about 140 GB and a Workers
 Builds container has 20 GB of disk, so the archive is split across 25 of these
 repos. This one holds shard ${index}, tile parts ${first} to ${last}.
 
