@@ -1146,7 +1146,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
 
     map = new maplibregl.Map({
       container: "map",
-      style: current.url,
+      style: current.url.startsWith("/") ? current.url : "/" + current.url,
       center: place.center,
       zoom: place.zoom,
       attributionControl: false,
@@ -1242,7 +1242,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
       setFlavorPalette(flavor.id);
       apply();
     } else {
-      map.setStyle(flavor.url);
+      map.setStyle(flavor.url.startsWith("/") ? flavor.url : "/" + flavor.url);
           // Forget what we thought was on screen, or the first builder edit
           // would diff against a style that is no longer there.
         appliedStyle = null;
