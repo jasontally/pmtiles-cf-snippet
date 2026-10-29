@@ -44,7 +44,7 @@ const REPO_OWNER = "jasontally";
 // and then build the old archive. That variable is removed below, not just
 // ignored.
 const BUILD_COMMAND = "npm run build";
-const DEPLOY_COMMAND = "npx wrangler deploy";
+const DEPLOY_COMMAND = "for i in 1 2 3; do npx wrangler deploy && exit 0; echo \"deploy attempt $i failed\"; sleep $((i*30)); done; exit 1";
 
 const API = "https://api.cloudflare.com/client/v4";
 const TOKEN = process.env.CLOUDFLARE_API_TOKEN;

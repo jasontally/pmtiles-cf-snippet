@@ -305,14 +305,32 @@ function deployAssets() {
     fail(`${files} files exceeds the 100,000 file limit. Raise the part size.`);
   }
   // wrangler reads its own credentials from the environment. No account id is
-  // needed here, and the snippet step only needs a zone.
-  //
-  // CLOUDFLARE_API_TOKEN needs no build variable. Workers Builds injects it for
-  // wrangler, and the build command sees the same value. Adding it as a build
-  // secret would replace Cloudflare's own token, so do not.
+  // needed here, and the snippet step only needs a zone. CLOUDFLARE_API_TOKEN
+  // needs no build variable: Workers Builds injects it, and adding one would
+  // replace Cloudflare's own token, so do not.
   // Cloudflare compares a content hash per file and skips unchanged ones, so a
   // build that changed a few parts uploads only those files.
-  run("npx", ["--yes", "wrangler@latest", "deploy"], { quiet: false });
+  // Cloudflare's asset upload fails transiently with API error 10013 on large
+  // sets. Retrying the same command usually succeeds, and a retry here costs
+  // seconds rather than a whole failed build.
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    const result = spawnSync("npx", ["--yes", "wrangler@latest", "deploy"], {
+      stdio: "inherit",
+      cwd: ROOT,
+    });
+    if (!result.error && result.status === 0) {
+      console.log(`wrangler deploy succeeded on attempt ${attempt}`);
+      return;
+    }
+    if (result.error) console.error(`wrangler could not start: ${result.error.message}`);
+    else console.error(`wrangler deploy exited ${result.status} on attempt ${attempt}`);
+    if (attempt < 3) {
+      const wait = attempt * 30;
+      console.log(`waiting ${wait}s before retrying`);
+      spawnSync("sleep", [String(wait)], { stdio: "inherit" });
+    }
+  }
+  fail("wrangler deploy failed after 3 attempts");
 }
 
 /**

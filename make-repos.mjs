@@ -169,8 +169,9 @@ One shard of the Protomaps basemap. The archive is about 140 GB and a Workers
 Builds container has 20 GB of disk, so the archive is split across 25 of these
 repos. This one holds shard ${index}, tile parts ${first} to ${last}.
 
-Shard 0 also holds \`head.bin\`, \`meta.bin\`, and the leaf directories, which
-together are 324.9 MB. Every other shard is pure tile data.
+The deploy command retries \`npx wrangler deploy\` three times, because the asset
+upload fails transiently with Cloudflare API error 10013 on large sets. The retry
+is seconds; a failed build is a week of stale data.
 
 Read the design and the arithmetic in
 [pmtiles-cf-snippet](https://github.com/jasontally/pmtiles-cf-snippet), file
