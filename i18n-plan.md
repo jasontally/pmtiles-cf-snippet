@@ -104,8 +104,7 @@ one column below, maximum height 70 vh with its own scroll.
 
 Each entry is `<a href="/de/" hreflang="de" lang="de">Deutsch</a>`. The current
 language carries `aria-current="true"`. The order is the order in the table
-above: European languages first, then Chinese and CJK, then south-east Asia, then
-South Asia, then the right-to-left set. Native names are never translated.
+above: by total number of speakers, descending. Native names are never translated.
 
 The menu needs no JavaScript to open or to navigate. A few lines close it on
 Escape and on a click outside, and move focus back to the summary. In an RTL
