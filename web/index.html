@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Protomaps Basemap tiles — free, no API key</title>
-<meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee.">
+<meta name="description" content="Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee. A drop-in replacement for blocked OpenStreetMap raster tiles in Leaflet and MapLibre.">
 <link rel="icon" href="data:,">
 <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
 
@@ -221,6 +221,16 @@
   td.mono, th.mono { font-size: .84rem; }
   .scroll { overflow-x: auto; }
   .note { border-left: 3px solid var(--line); padding: .1rem 0 .1rem 1rem; color: var(--muted); }
+  /* The one line above the fold that leads somewhere else. It sits under the
+     facts, so it is the last thing in the hero and the first thing a reader who
+     came from a blocked map will notice. */
+  .hero-note { margin: .85rem 0 0; font-size: .9rem; }
+  /* A quoted error message, in the page's own type, because the exact words are
+     what a search looks for and what a reader recognises. */
+  .quote { margin: .75rem 0 0; padding: .6rem .9rem; background: var(--code-bg);
+    border: 1px solid var(--line); border-radius: 8px; font-size: .86rem; }
+  .quote p { margin: 0; }
+  .quote p + p { margin-top: .4rem; }
   .swatch { display: inline-block; width: .8rem; height: .8rem; border-radius: 3px; border: 1px solid rgba(0,0,0,.2); vertical-align: -1px; }
   footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
 </style>
@@ -232,8 +242,7 @@
   <h1>Protomaps Basemap tiles</h1>
   <p class="lede">
     The whole Protomaps Basemap, zoom 0 to 15, served as one PMTiles archive over
-    plain HTTP. Point any PMTiles client at the URL and it works. There is no API
-    key, no account, and no rate limit.
+    plain HTTP. Point any PMTiles client at the URL and it works.
   </p>
 
   <code class="url mono">https://tiles.jasontally.com/basemap.pmtiles</code>
@@ -241,7 +250,14 @@
   <ul class="facts">
     <li><b>No API key</b><span>Nothing to sign up for, no token in your code.</span></li>
     <li><b>No rate limit</b><span>No throttling, no quota, no burst cap.</span></li>
+    <li><b>Monthly</b><span>Rebuilt from the newest Protomaps release once a month.</span></li>
   </ul>
+
+  <p class="note hero-note">
+    A blocked OpenStreetMap tile, or a 403 from
+    <span class="mono">tile.openstreetmap.org</span>? <a href="#migrate">Start
+    here</a>.
+  </p>
 </header>
 
 <section id="try">
@@ -326,10 +342,9 @@
 
   <h3>One. Put a map on the page</h3>
   <p>
-    Copy this file. It is the whole example: three script tags, one style URL, one
-    map. The two libraries are pinned to a version, and both are BSD-3-Clause, so
-    you can put them on your own host if you would rather: the URLs are all of
-    jsDelivr's, and the files are the same ones either way.
+    Copy this file. It is the whole example: three tags, one style URL, one map. Both
+    libraries are pinned and BSD-3-Clause, and the same files are served from this
+    host if you would rather not use a CDN.
   </p>
 <pre><code>&lt;!doctype html&gt;
 &lt;html&gt;
@@ -437,7 +452,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
   <h3>Four. Fonts, sprites and the libraries</h3>
   <p>
     A map is the tiles, a <code>glyphs</code> URL for text, optionally a
-    <code>sprite</code> URL for icons, and two libraries to draw any of it. All of
+    <code>sprite</code> URL for icons, and the libraries to draw any of it. All of
     that is here, at the paths each one expects, so a map can come from a single
     hostname if you want it to.
   </p>
@@ -448,19 +463,19 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
     </table>
   </div>
   <p>
-    The two libraries are here and are also on jsDelivr. This page loads them from
-    jsDelivr, because that measured faster; the copies here are so that you can use
-    one hostname if you prefer. Both are the same files, pinned to the same version,
-    so swapping is a URL change and nothing else.
+    The MapLibre and PMTiles files are on jsDelivr and here. Either URL works.
+  </p>
+  <p>
+    The last row is not used by this page. It is the Leaflet vector renderer,
+    published here so the swap is one script tag. Leaflet itself stays on its own
+    CDN.
   </p>
   <p>
     Two font stacks, <code>Noto Sans Regular</code> and <code>Noto Sans Medium</code>,
-    each as the 256 files MapLibre asks for, 256 codepoints at a time. All 256 ranges
-    are published rather than only the Latin ones, because Protomaps labels features
-    with their local name: pan to Tokyo or Cairo and the labels are not English, so
-    they need ranges in the tens of thousands. Publishing only the ranges an
-    English-language map uses would turn those labels into nothing at all, with no
-    error to tell you why.
+    split into the 256 ranges MapLibre asks for, 256 codepoints at a time. All 256 are
+    published, not just the Latin ones: Protomaps labels features with their
+    local name, so Tokyo or Cairo needs ranges in the tens of thousands. Publish only
+    what an English map uses and those labels vanish, with no error to say why.
   </p>
   <p>
     Five sprite sheets, one per upstream flavour, at 1x and 2x. The styles below draw
@@ -493,7 +508,7 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
     layer, as features with <code>kind=address</code> and an
     <code>addr_housenumber</code>. That field arrived in a later Protomaps build than
     the one this map is serving, so the house number layer is built and switches
-    itself on when the next weekly refresh brings them in. The same is true of the
+    itself on when the next monthly refresh brings them in. The same is true of the
     shield text: the current build carries <code>shield_text_length</code>, which is
     how many characters a route number is and not what they are, so a shield drawn
     from it would be a blank shape on every motorway.
@@ -561,12 +576,10 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
   }
 }</code></pre>
     <p class="note">
-      One rule underneath all of this: a layer that draws nothing is not an error.
-      MapLibre will not tell you a filter matched nothing, that a font stack is not on
-      the host, or that an icon is missing from the sheet, and a missing icon takes
-      the label with it. If a layer of yours is blank, the order worth checking is the
-      field name, then the layer's minzoom, then the font stack, then the icon name
-      against the sheet's own <code>light.json</code>.
+      A layer that draws nothing is not an error, and MapLibre will not say which
+      check failed. If yours is blank, check in this order: the field name, the
+      layer's minzoom, the font stack, then the icon name against the sheet's own
+      <code>light.json</code>.
     </p>
   <p>
     If you have a style that points its glyphs at <code>demotiles.maplibre.org</code>,
@@ -604,13 +617,11 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
   </p>
 
   <h3>Five. About Leaflet</h3>
-  <p class="note">
-    These are <strong>vector</strong> tiles. Leaflet draws raster tiles, and the
-    PMTiles library will refuse this archive in Leaflet with
-    <code>archive contains MVT vector tiles, but leafletRasterLayer is for
-    displaying raster tiles</code>. That is the library being correct, not a bug.
-    Use MapLibre GL as above. If you need Leaflet or a raster image pipeline, you
-    need a raster-rendered archive, which this is not.
+  <p>
+    Leaflet's <code>L.tileLayer</code> draws pictures; these are vector tiles. A
+    Leaflet map can still use them, and either way keeps your markers, popups and
+    controls. Both swaps are in
+    <a href="#migrate">Moving from OpenStreetMap tiles</a>.
   </p>
 
   <h3>Six. Read the archive with the PMTiles library</h3>
@@ -635,10 +646,196 @@ console.log(tile.data.byteLength);</code></pre>
     <code>FetchSource</code>; given a URL string it will not work.
   </p>
   <p class="note">
-    The archive is a snapshot, rebuilt weekly from a new Protomaps release. It is
-    never current to the hour, so if you need today's OpenStreetMap data use a source
-    that publishes updates. The timing and the delay to expect are in
-    <a href="#freshness">How fresh is this?</a>.
+    The archive is a snapshot, not a live feed.
+    <a href="#freshness">How fresh is this?</a> has the timing.
+  </p>
+</section>
+
+<section id="migrate">
+  <h2>Moving from OpenStreetMap tiles</h2>
+  <p class="sub">
+    The tile usage policy block, the 403, and what to do about them. No key, no
+    quota.
+  </p>
+
+  <h3>Why the map shows a block</h3>
+  <div class="quote">
+    <p>App is not following the tile usage policy of OpenStreetMap’s volunteer-run servers</p>
+    <p>General block: app is not following the tile usage policy of openstreetmap volunteer-run servers</p>
+    <p>403 Forbidden — tile.openstreetmap.org</p>
+  </div>
+  <p>
+    The tile servers sent that image instead of the map, on purpose, under
+    <a href="https://operations.osmfoundation.org/policies/tiles/">the tile usage policy</a>.
+    It is not a fault, and fixing the URL does not clear it.
+  </p>
+  <p>What people try first:</p>
+  <ul>
+    <li>
+      <strong>Changing <code>a</code>/<code>b</code>/<code>c</code> to the canonical
+      host does not unblock you.</strong> The canonical URL is required, but the block
+      is attached to the app or the Referer that was seen, not to the hostname.
+    </li>
+    <li>
+      <strong>Retrying makes it worse.</strong> Volume is part of what the block is
+      for.
+    </li>
+    <li>
+      <strong>No header trick rescues a page opened from disk.</strong>
+      <code>file://</code> sends no <code>Referer</code>. Sending
+      <code>X-Requested-With</code> instead would need a CORS preflight for every
+      tile, and the tile servers refuse that preflight too. Firefox and Chromium
+      differ in which headers they send; the rule is the same for both.
+    </li>
+    <li>
+      <strong>Works on <code>localhost</code>, blocked on the live site?</strong> That
+      is the origin. The Referer for your domain is what gets blocked, and
+      <code>localhost</code> sends a different one.
+    </li>
+  </ul>
+  <p class="note">
+    Offices, schools, VPNs and mobile networks share an address, and blocks apply to
+    addresses as well as apps. From your side you cannot tell which you have.
+  </p>
+  <p>So stop asking those servers. There are three ways off them.</p>
+
+  <h3>Keep Leaflet</h3>
+  <p>
+    <a href="https://github.com/protomaps/protomaps-leaflet">protomaps-leaflet</a>
+    draws vector tiles in Leaflet. It reads the archive itself and adds itself as a
+    normal layer, so markers, popups, GeoJSON and controls stay where they are. A
+    copy is here, tested against this archive:
+    <code class="mono">https://tiles.jasontally.com/vendor/protomaps-leaflet.js</code>.
+  </p>
+  <p>Before:</p>
+<pre><code>&lt;link rel=<span class="s">"stylesheet"</span> href=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"</span>&gt;
+&lt;script src=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"</span>&gt;&lt;/script&gt;
+
+&lt;script&gt;
+  const map = L.map(<span class="s">"map"</span>).setView([48.85, 2.35], 12);
+
+  L.tileLayer(<span class="s">"https://tile.openstreetmap.org/{z}/{x}/{y}.png"</span>, {
+    maxZoom: 19,
+    attribution: <span class="s">'&amp;copy; &lt;a href="https://www.openstreetmap.org/copyright"&gt;OpenStreetMap&lt;/a&gt; contributors'</span>
+  }).addTo(map);
+&lt;/script&gt;</code></pre>
+  <p>After:</p>
+<pre><code>&lt;link rel=<span class="s">"stylesheet"</span> href=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"</span>&gt;
+&lt;script src=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"</span>&gt;&lt;/script&gt;
+<span class="a">+ &lt;script src="https://tiles.jasontally.com/vendor/protomaps-leaflet.js"&gt;&lt;/script&gt;</span>
+
+&lt;script&gt;
+  const map = L.map(<span class="s">"map"</span>).setView([48.85, 2.35], 12);
+
+<span class="d">-  L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", { ... }).addTo(map);</span>
+<span class="a">+  protomapsL.leafletLayer({</span>
+<span class="a">+    url: "https://tiles.jasontally.com/basemap.pmtiles",</span>
+<span class="a">+    flavor: "light",</span>
+<span class="a">+    lang: "en"</span>
+<span class="a">+  }).addTo(map);</span>
+&lt;/script&gt;</code></pre>
+  <ul>
+    <li>
+      <strong><code>flavor</code></strong> is <code>light</code>, <code>dark</code>,
+      <code>white</code>, <code>grayscale</code> or <code>black</code>. Those are the
+      library’s themes, not the styles above, so the colours will not match exactly.
+    </li>
+    <li>
+      <strong>Labels are canvas text in the system font.</strong> No glyph URL, no
+      font that can 404.
+    </li>
+    <li>
+      <strong>z15 is the deepest tile.</strong> The layer overzooms past it, and
+      <code>maxDataZoom: 15</code> is already the default.
+    </li>
+  </ul>
+  <p class="note">
+    protomaps-leaflet is in maintenance mode upstream: fixes, not features. Fine for
+    an existing Leaflet app. New work should start on MapLibre GL.
+  </p>
+
+  <h3>Keep Leaflet, render with MapLibre</h3>
+  <p>
+    <a href="https://github.com/maplibre/maplibre-gl-leaflet">@maplibre/maplibre-gl-leaflet</a>
+    puts a MapLibre map in Leaflet’s tile pane. Use it when you want one of the styles
+    above, or terrain and hillshade, in an app that stays Leaflet.
+  </p>
+<pre><code>&lt;link rel=<span class="s">"stylesheet"</span> href=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"</span>&gt;
+&lt;link rel=<span class="s">"stylesheet"</span> href=<span class="s">"https://tiles.jasontally.com/vendor/maplibre-gl.css"</span>&gt;
+&lt;script src=<span class="s">"https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"</span>&gt;&lt;/script&gt;
+&lt;script src=<span class="s">"https://tiles.jasontally.com/vendor/maplibre-gl.js"</span>&gt;&lt;/script&gt;
+&lt;script src=<span class="s">"https://tiles.jasontally.com/vendor/pmtiles.js"</span>&gt;&lt;/script&gt;
+&lt;script src=<span class="s">"https://cdn.jsdelivr.net/npm/@maplibre/maplibre-gl-leaflet@0.1.4/dist/leaflet-maplibre-gl.js"</span>&gt;&lt;/script&gt;
+
+&lt;script&gt;
+  <span class="c">// The style's source is pmtiles://, so MapLibre needs the protocol first.</span>
+  maplibregl.addProtocol(<span class="s">"pmtiles"</span>, new pmtiles.Protocol().tile);
+
+  const map = L.map(<span class="s">"map"</span>, { minZoom: 1 }).setView([48.85, 2.35], 12);
+
+  const gl = L.maplibreGL({
+    style: <span class="s">"https://tiles.jasontally.com/styles/light.json"</span>
+  }).addTo(map);
+
+  <span class="c">// gl.getMaplibreMap() is the MapLibre map, for sources and layers.</span>
+&lt;/script&gt;</code></pre>
+  <ul>
+    <li>
+      <strong>Register the protocol first.</strong> Without the
+      <code>addProtocol</code> line the console says
+      <code>URL scheme "pmtiles" is not supported</code> and the map stays blank.
+    </li>
+    <li>
+      <strong>MapLibre draws one zoom below Leaflet.</strong> Its tiles are 512 px
+      against Leaflet’s 256, so a layer with <code>minzoom</code> 12 appears when
+      Leaflet reaches z13.
+    </li>
+    <li>
+      <strong>Leaflet still draws on top.</strong> The canvas sits in the tile pane,
+      so markers and overlays behave as they do over a raster layer.
+    </li>
+  </ul>
+
+  <h3>Move to MapLibre GL</h3>
+  <p>
+    One library, no adapter, and the styles above work as they are. The full page is
+    in <a href="#use">One. Put a map on the page</a>. The swap is mostly a coordinate
+    flip:
+  </p>
+  <div class="scroll">
+    <table>
+      <thead><tr><th>Leaflet</th><th>MapLibre GL</th></tr></thead>
+      <tbody>
+        <tr><td><code>L.map("map").setView([lat, lng], z)</code></td><td><code>new maplibregl.Map({ container: "map", center: [lng, lat], zoom: z })</code></td></tr>
+        <tr><td><code>L.tileLayer(url).addTo(map)</code></td><td>a style with a vector source; see above</td></tr>
+        <tr><td><code>L.marker([lat, lng]).bindPopup(html)</code></td><td><code>new maplibregl.Marker().setLngLat([lng, lat]).setPopup(new maplibregl.Popup().setHTML(html))</code></td></tr>
+        <tr><td><code>L.geoJSON(data)</code></td><td><code>addSource(id, { type: "geojson", data })</code>, then <code>addLayer</code></td></tr>
+        <tr><td><code>L.control.scale()</code></td><td><code>new maplibregl.ScaleControl()</code></td></tr>
+        <tr><td><code>map.invalidateSize()</code></td><td><code>map.resize()</code></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <p class="note">
+    <code>setView([lat, lng])</code> takes latitude first; every MapLibre call takes
+    <code>[lng, lat]</code>. A map in the wrong hemisphere is that, not the tiles.
+    Sources and layers added before the style loads are dropped without an error, so
+    add them in <code>map.on("load", …)</code>.
+  </p>
+
+  <h3>“archive contains MVT vector tiles, but leafletRasterLayer is for displaying raster tiles”</h3>
+  <p>
+    That is <code>pmtiles.leafletRasterLayer</code>, which draws raster PMTiles as
+    images. These are vector tiles, so it refuses them. No option changes that, and
+    there is no raster copy here. Use one of the options above.
+  </p>
+
+  <h3>“download.openstreetmap.fr returned 403”</h3>
+  <p>
+    That is an extract and replication mirror, not a tile server. In October 2026 it
+    blocked addresses after abusive downloads, and the operators said they would
+    restore access case by case. Nothing here needs it: this archive comes from
+    Protomaps releases, so you do not assemble <code>.osm.pbf</code> yourself. If you
+    do pull OSM data, take a periodic extract rather than the minute stream.
   </p>
 </section>
 
@@ -676,10 +873,9 @@ console.log(tile.data.byteLength);</code></pre>
       it, host your own copy of the tiles or buy a supported plan from someone.
     </li>
     <li>
-      <strong>It is never current to the hour.</strong> The copy is rebuilt monthly
-      from the newest Protomaps Basemap release, so OpenStreetMap edits made this
-      month are not in it yet. Expect a delay of a few days to a month or more behind
-      OpenStreetMap.
+      <strong>It is never current to the hour.</strong> The copy is a snapshot of the
+      newest Protomaps release, not a live feed. Edits made today are not in it.
+      <a href="#freshness">How fresh is this?</a> has the timing.
     </li>
     <li>
       <strong>No whole-file download.</strong> Requests are answered in ranges of at
@@ -695,19 +891,19 @@ console.log(tile.data.byteLength);</code></pre>
 
 <section id="freshness">
   <h2>How fresh is this?</h2>
-  <p class="sub">The tiles are a copy of the Protomaps Basemap, rebuilt weekly.</p>
+  <p class="sub">The tiles are a copy of the Protomaps Basemap, rebuilt once a month.</p>
 
   <ul>
     <li>
-      <strong>Rebuilt on Sundays.</strong> The rebuild runs between 00:30 and
-      07:00 UTC. That is the only window in which the upstream project has never
-      published in three years of release history, so a rebuild is not competing
-      with a new upstream build halfway through.
+      <strong>Rebuilt once a month.</strong> The build runs on the first Sunday of
+      the month, between 00:30 and 07:00 UTC, the only window in which upstream has
+      not published in three years of release history. Monthly and not weekly,
+      because a new archive invalidates the cached parts on the CDN and in every
+      browser that already has them, and each rebuild costs build time.
     </li>
     <li>
-      <strong>Nothing to do most weeks.</strong> A rebuild only happens when the
-      upstream project has published something new since the last one. In a week
-      with no new upstream release, nothing is rebuilt.
+      <strong>Nothing to do most months.</strong> A rebuild only happens when upstream
+      has published a new release.
     </li>
     <li>
       <strong>Which upstream build is in use right now?</strong> Use the
@@ -864,7 +1060,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       ...(assets.libraries || []).map((lib) =>
         "<tr><td>" + lib.name + "</td>" +
         cell("", location.origin + lib.path, "v" + lib.version + ", also on jsDelivr") +
-        '<td><a href="' + licenceFor("libraries").path + '" target="_blank" rel="noopener">' +
+        '<td><a href="' + (lib.licencePath || licenceFor("libraries").path) + '" target="_blank" rel="noopener">' +
         licenceFor("libraries").label + "</a></td></tr>"
       ),
     ];

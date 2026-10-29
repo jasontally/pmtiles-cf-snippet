@@ -25,14 +25,20 @@ const FIRST_SLOT_MINUTE = 30;
 /** Each shard starts this many minutes after the one before it. */
 const SLOT_MINUTES = 4;
 
-/** The slot for a shard: its own minute, so no two shards start together. */
+/**
+ * The slot for a shard: its own minute, so no two shards start together.
+ *
+ * Sunday only. The target is anchored to the first Sunday of the month, so the
+ * other Sundays are cheap retries for a shard that missed its build, not extra
+ * data updates. refresh.mjs holds the anchor rule.
+ */
 export function slotFor(index) {
   const position = ORDER.indexOf(index);
   if (position < 0) throw new Error(`shard ${index} is not in the refresh order`);
   const total = FIRST_SLOT_MINUTE + position * SLOT_MINUTES;
   const hour = Math.floor(total / 60);
   const minute = total % 60;
-  return { minute, hour, cron: `${minute} ${hour} 1-7 * 0` };
+  return { minute, hour, cron: `${minute} ${hour} * * 0` };
 }
 
 export function workflowFor(index) {
@@ -47,13 +53,18 @@ export function workflowFor(index) {
 # inside the window in which Protomaps has never published in 159 weeks of
 # release history: 00:16 to 07:34 UTC.
 #
+# The target is the newest build published before the first Sunday of the month,
+# so only that Sunday carries new data. The other Sundays recompute the same
+# target: a shard already holding it does nothing, and a shard that missed its
+# build on the first Sunday tries again.
+#
 # This workflow holds no credentials and needs none. It commits archive.json, and
 # that commit is what starts the Cloudflare build. Cloudflare injects its own
 # token where the archive is fetched, so nothing outside Cloudflare ever holds
 # one, and there is no secret for this repo to leak.
 #
 # Most Sundays this makes no commit, because the newest eligible Protomaps build
-# has not changed, and a no-commit week costs no build minutes and uploads no
+# has not changed, and a no-commit run costs no build minutes and uploads no
 # data. Skipping the commit is the point, not a side effect: a refresh is 25
 # builds and 138 GB of upload.
 on:

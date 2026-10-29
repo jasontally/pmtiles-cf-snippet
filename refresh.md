@@ -68,17 +68,24 @@ Six and a half hours fits 25 slots at 4 minutes, which is exactly the number of
 shards. That is the whole reason for the 4 minute interval and the 6 to 7 hour
 window.
 
-Chosen: **Sunday, 00:30 to 02:10 UTC**, 25 slots of 4 minutes, and the reader
-follows at 02:50. Sunday because it is tied quietest by weekday with Saturday,
-one release in 159 weeks, and that one was at 08:52 UTC, well clear of the
-window. As local time this is Saturday evening to Sunday early morning in the
-Americas.
+Chosen: **00:30 to 02:10 UTC on the first Sunday of the month**, 25 slots of 4
+minutes, and the reader follows at 02:50. Sunday because it is tied quietest by
+weekday with Saturday, one release in 159 weeks, and that one was at 08:52 UTC,
+well clear of the window. As local time this is Saturday evening to Sunday early
+morning in the Americas.
+
+The **first Sunday of the month**, not every Sunday, because a new archive
+invalidates the cached parts on the CDN and in every browser that has them, and a
+rebuild is 25 builds and 138 GB of upload. Monthly is the cadence the service
+publishes. Later Sundays still run the refresh decision and recompute the same
+target: a shard that holds it does nothing, and a shard that missed its build on
+the first Sunday tries again. That is a retry, not new data.
 
 The window gates **starting a shard build**. Updating the reader is not gated,
 because it reads the header from our own shard 0 rather than from Protomaps, so
-it carries no risk of racing an upstream publish. The workflow therefore also runs
-on Monday, which gives a long tail for a shard 0 that built slowly. Without the
-fourteenth slot the reader would wait a week for its offsets.
+it carries no risk of racing an upstream publish. The reader workflow therefore also
+runs on Monday, which gives a long tail for a shard 0 that built slowly. Without
+the fourteenth slot the reader would wait a week for its offsets.
 
 The 4 hour minimum age on a Protomaps build matters more than the window. A build
 is listed before it is finished being written, and a short read would produce a
@@ -144,13 +151,14 @@ another, and the reader could not tell which is which.
 
 The answer is anchored to a fixed point instead:
 
-> the newest Protomaps build published before the most recent Sunday 00:30 UTC
+> the newest Protomaps build published before 00:30 UTC on the first Sunday of
+> the current month
 
 Every repo computes the same anchor, so every repo computes the same target,
-whatever minute of the window it fires at. A build that appears mid-window is
-ignored until the following week. There is no state file, no coordination, and no
-ordering to get wrong. `shard-repo/refresh.test.mjs` checks this directly by
-running the rule at all 25 slot times and asserting one answer.
+whatever minute of the window it fires at. A build that appears after the first
+Sunday is ignored until the following month. There is no state file, no
+coordination, and no ordering to get wrong. `shard-repo/refresh.test.mjs` checks
+this directly by running the rule at all 25 slot times and asserting one answer.
 
 There is a second rule underneath it: a build must be at least 4 hours old before
 we cut parts from it. Protomaps lists a build before it has finished writing it,
@@ -158,13 +166,13 @@ and a short read gives parts that are the right length and the wrong bytes, whic
 no size check catches. The anchor already keeps a build days old, so this is a
 second line of defence, and the script refuses rather than proceeding if it fails.
 
-### Most months nothing happens
+### Most Sundays nothing happens
 
 If the target equals what the shard already holds, `refresh.mjs` reports no change
-and makes no commit, so no build runs and nothing uploads. A refresh is 25 builds
-and 138 GB, so skipping it on a month when Protomaps has not published is the
-point rather than a side effect. `workflow_dispatch` with `force: true` rebuilds
-anyway.
+and makes no commit, so no build runs and nothing uploads. That is every Sunday
+except the first, in a normal month. A refresh is 25 builds and 138 GB, so
+skipping it when the target has not moved is the point rather than a side effect.
+`workflow_dispatch` with `force: true` rebuilds anyway.
 
 ### The reader follows afterwards
 
@@ -266,9 +274,9 @@ The window is roughly two hours. Two ways to remove it:
 
 - **Two generations.** Build the new archive into a second set of 25 Workers
   while the first set keeps serving, flip the reader, then rebuild the first set
-  for the following week. Correct with no window, at the cost of 25 more Workers,
-  25 more hostnames, and a host table of 50 in the reader. The same 25 repos can
-  deploy to two Workers each by running `wrangler deploy` twice with different
+  afterwards. Correct with no window, at the cost of 25 more Workers, 25 more
+  hostnames, and a host table of 50 in the reader. The same 25 repos can deploy
+  to two Workers each by running `wrangler deploy` twice with different
   config files.
 - **Shorter window.** Run the shards in batches instead of one at a time. The
   batches overlap, and one of 25 builds was killed at 31 minutes when six ran

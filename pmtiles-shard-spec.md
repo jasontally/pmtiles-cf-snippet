@@ -422,7 +422,11 @@ Found by loading the page in a browser, not by reading the code:
 - `pmtiles.leafletRasterLayer` refuses this archive with
   `archive contains MVT vector tiles, but leafletRasterLayer is for displaying
   raster tiles`. That is correct behaviour, so the page explains it instead of
-  showing an example that cannot work.
+  showing an example that cannot work. A Leaflet app that wants these tiles needs a
+  vector renderer: `protomaps-leaflet`, which is vendored at
+  `assets/vendor/protomaps-leaflet.js` and published at `/vendor/`, or MapLibre GL
+  inside a Leaflet layer. Both are in the page's migration section, and both were
+  loaded against the live archive before being written down.
 
 ## 12. Verification tests
 

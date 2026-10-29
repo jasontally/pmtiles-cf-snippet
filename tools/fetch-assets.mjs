@@ -87,6 +87,11 @@ const VENDOR = [
   { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js", to: "vendor/maplibre-gl.js" },
   { url: "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css", to: "vendor/maplibre-gl.css" },
   { url: "https://cdn.jsdelivr.net/npm/pmtiles@3.2.1/dist/pmtiles.js", to: "vendor/pmtiles.js" },
+  // The one library here that is not part of this page. A Leaflet app that wants
+  // these tiles needs a vector renderer, and this is the drop-in one: the same
+  // `addTo(map)` a raster tile layer uses. It carries its own PMTiles reader, so
+  // a Leaflet map needs this file and nothing else beyond Leaflet.
+  { url: "https://cdn.jsdelivr.net/npm/protomaps-leaflet@5.1.0/dist/protomaps-leaflet.js", to: "vendor/protomaps-leaflet.js" },
 ];
 
 const LICENCES = [
@@ -111,6 +116,11 @@ const LICENCES = [
     from: "https://raw.githubusercontent.com/protomaps/PMTiles/main/LICENSE",
     to: "assets/vendor/pmtiles-LICENSE.txt",
     note: "BSD-3-Clause, covers ptiles.js",
+  },
+  {
+    from: "https://raw.githubusercontent.com/protomaps/protomaps-leaflet/main/LICENSE",
+    to: "assets/vendor/protomaps-leaflet-LICENSE.txt",
+    note: "BSD-3-Clause, covers protomaps-leaflet.js",
   },
 ];
 

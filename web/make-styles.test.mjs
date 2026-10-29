@@ -329,9 +329,10 @@ await check("the page links the tiles URL the styles use", () => {
     assert.ok(!page.includes(leak), `the page mentions ${leak}`);
   }
   // The rebuild section has to say when, and must not promise an instant swap.
-  // "Rebuilt", not "refreshed": a weekly rebuild from a new upstream release is
-  // not the same claim as data that keeps itself up to date.
-  assert.ok(page.includes("Rebuilt on Sundays"), "the page does not say when it rebuilds");
+  // "Rebuilt", not "refreshed": a monthly rebuild from a new upstream release is
+  // not the same claim as data that keeps itself up to date. Monthly is the
+  // published cadence, chosen to limit cache churn and build cost.
+  assert.ok(page.includes("Rebuilt once a month"), "the page does not say when it rebuilds");
   assert.ok(/00:30 and\s+07:00 UTC/.test(page), "the page does not give the rebuild window");
   assert.ok(
     page.includes("Archive metadata"),
@@ -343,7 +344,7 @@ await check("the page links the tiles URL the styles use", () => {
     !/(tiles|data|archive)[^.<]{0,40}never (changes|out of date|stale)/i.test(page),
     "the page promises data that never goes stale"
   );
-  assert.ok(/weekly|week/i.test(page), "the page does not give a staleness scale");
+  assert.ok(/month/i.test(page), "the page does not give a staleness scale");
 });
 
 await check("the page opens on the style the build names as the default", () => {
@@ -994,7 +995,7 @@ await check("the examples cover the layers, the colours, and where the copy goes
 
   // And the freshness claim is current, not the old "not being refreshed".
   assert.ok(!page.includes("is not being refreshed"), "the page still says the archive is not refreshed");
-  assert.ok(page.includes("rebuilt weekly"), "the page does not say the copy is rebuilt weekly");
+  assert.ok(page.includes("rebuilt once a month"), "the page does not say the copy is rebuilt once a month");
 });
 
 await check("every label and halo clears the WCAG AA text bar", async () => {

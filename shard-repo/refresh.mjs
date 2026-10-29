@@ -12,17 +12,24 @@
  *
  * WHY EVERY SHARD PICKS THE SAME BUILD WITHOUT TALKING TO EACH OTHER
  *
- * Each of the 13 repos runs this independently, so "the newest build" would give
- * 13 different answers if a Protomaps build landed halfway through the window and
- * some shards had already run. The answer is therefore anchored to a fixed point:
+ * Each repo runs this independently, so "the newest build" would give a
+ * different answer in each if a Protomaps build landed halfway through the
+ * window and some shards had already run. The answer is therefore anchored to a
+ * fixed point:
  *
- *   target = the newest Protomaps build published BEFORE the most recent
- *            Sunday 00:30 UTC
+ *   target = the newest Protomaps build published BEFORE 00:30 UTC on the first
+ *            Sunday of the current month
  *
  * Every repo computes the same anchor, so every repo computes the same target,
  * whichever minute of the window it happens to run at. A build that appears
- * mid-window is simply ignored until the next week, which is the whole point of
- * scheduling inside the quiet hours in the first place.
+ * after the first Sunday is ignored until the next month. That is the monthly
+ * cadence: one new archive a month, so browsers and the CDN are not asked to
+ * throw away their cached parts every week, and 25 shard builds are not spent
+ * on data nobody has had time to change.
+ *
+ * Later Sundays still run, and still compute the same target. That is what
+ * retries a shard that failed on the first Sunday: the key it holds is not the
+ * target, so it commits again. A shard that succeeded does nothing.
  *
  * WHY NOT JUST USE THE NEWEST
  *
@@ -39,8 +46,9 @@ const BUILDS_URL = "https://build-metadata.protomaps.dev/builds.json";
 const ARCHIVE_BASE = "https://build.protomaps.com/";
 
 /**
- * The quiet window opens Sunday 00:30 UTC. 00:16 to 07:34 UTC is the only span
- * in which Protomaps has not published in 159 weeks of release history.
+ * The quiet window opens at 00:30 UTC on the first Sunday of the month. 00:16 to
+ * 07:34 UTC is the only span in which Protomaps has not published in 159 weeks
+ * of release history.
  */
 const WINDOW_HOUR_UTC = 0;
 const WINDOW_MINUTE_UTC = 30;
@@ -61,19 +69,33 @@ function output(name, value) {
   writeFileSync(file, `${name}=${value}\n`, { flag: "a" });
 }
 
+/**
+ * 00:30 UTC on the first Sunday of a month.
+ *
+ * `month` may be outside 0..11; Date.UTC normalises it, so -1 is December of the
+ * previous year. That keeps the callers free of a special case for January.
+ */
+export function firstSundayOfMonth(year, month) {
+  const open = new Date(Date.UTC(year, month, 1, WINDOW_HOUR_UTC, WINDOW_MINUTE_UTC, 0));
+  // 0 is Sunday. If the 1st is Sunday the offset is 0; otherwise it is the
+  // distance to the next Sunday, at most 6.
+  open.setUTCDate(open.getUTCDate() + ((7 - open.getUTCDay()) % 7));
+  return open;
+}
+
 export function windowOpen(now = new Date()) {
   /**
-   * The most recent Sunday 00:30 UTC at or before `now`.
+   * The first Sunday of this month at 00:30, or last month's if that moment is
+   * still ahead of us.
    *
-   * Stepping back a whole week if that moment is still ahead of us means the
-   * anchor never depends on the clock within a run, so a repo that fires a few
-   * minutes early cannot pick a different target from the other twelve.
+   * The anchor depends only on the calendar, never on the clock within a run, so
+   * a shard that fires a few minutes early cannot pick a different target from
+   * the shards that fired before it.
    */
-  const open = new Date(
-    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate(), WINDOW_HOUR_UTC, WINDOW_MINUTE_UTC, 0)
-  );
-  open.setUTCDate(open.getUTCDate() - open.getUTCDay());
-  if (open.getTime() > now.getTime()) open.setUTCDate(open.getUTCDate() - 7);
+  let open = firstSundayOfMonth(now.getUTCFullYear(), now.getUTCMonth());
+  if (open.getTime() > now.getTime()) {
+    open = firstSundayOfMonth(now.getUTCFullYear(), now.getUTCMonth() - 1);
+  }
   return open;
 }
 
@@ -105,6 +127,19 @@ export function archiveUrl(key) {
   return `${ARCHIVE_BASE}${archiveFile(key)}`;
 }
 
+/**
+ * Is the target older than the build the shard already holds?
+ *
+ * With a monthly anchor this can happen: a mid-month dispatch recomputes the
+ * first Sunday of the month, which may point behind a build the shard picked up
+ * earlier. Keys are "YYYYMMDD.pmtiles", so a string compare is the date compare.
+ * A shard must never move backwards, because that rebuilds 25 Workers with older
+ * data and churns the cache for nothing.
+ */
+export function wouldDowngrade(held, targetKey) {
+  return Boolean(held) && held > targetKey;
+}
+
 /** Read the key this shard currently holds, or null if it has none. */
 export function currentKey(file = join(process.cwd(), "archive.json")) {
   try {
@@ -128,7 +163,7 @@ async function main() {
   const held = currentKey();
   const ageHours = (now.getTime() - new Date(target.uploaded).getTime()) / 3600000;
 
-  console.log(`window    ${target.windowOpen} UTC, the anchor every shard uses`);
+  console.log(`window    ${target.windowOpen} UTC, the first Sunday of the month, the anchor every shard uses`);
   console.log(`newest    ${newestKey(builds)}`);
   console.log(`target    ${target.key}  ${(target.size / 1e9).toFixed(1)} GB  ` +
     `published ${target.uploaded}  ${ageHours.toFixed(1)} h ago`);
@@ -138,6 +173,14 @@ async function main() {
     // The anchor should make this impossible. If it ever fires, refusing is far
     // better than cutting parts from an archive that is still being written.
     fail(`the target is only ${ageHours.toFixed(1)} h old and the minimum is ${MIN_AGE_HOURS} h`);
+  }
+
+  if (wouldDowngrade(held, target.key) && !force) {
+    console.log(`holding   ${held}, which is newer than the target`);
+    console.log("that is older data, so no commit and no rebuild");
+    output("changed", "false");
+    output("key", held);
+    return;
   }
 
   if (held === target.key && !force) {

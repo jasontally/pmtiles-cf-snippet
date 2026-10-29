@@ -1226,6 +1226,13 @@ function main() {
         { name: "MapLibre GL JS", version: "5.24.0", path: "/vendor/maplibre-gl.js", licence: "BSD-3-Clause" },
         { name: "MapLibre GL CSS", version: "5.24.0", path: "/vendor/maplibre-gl.css", licence: "BSD-3-Clause" },
         { name: "PMTiles JS", version: "3.2.1", path: "/vendor/pmtiles.js", licence: "BSD-3-Clause" },
+        // Leaflet itself is not published here: it is a third-party library with
+        // its own CDN and its marker images, and this host only carries what it
+        // would be awkward to get elsewhere. This one is the vector renderer a
+        // Leaflet app needs, and it is the reason the migration guide can promise
+        // a one-line swap rather than a rewrite.
+        { name: "protomaps-leaflet", version: "5.1.0", path: "/vendor/protomaps-leaflet.js", licence: "BSD-3-Clause",
+          licencePath: "/vendor/protomaps-leaflet-LICENSE.txt" },
       ],
       // Each licence travels with the files it covers. All four allow
       // redistribution.

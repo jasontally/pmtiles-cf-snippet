@@ -125,13 +125,13 @@ await check("the libraries are vendored even though the CDN is faster", () => {
   // Measured, and jsDelivr won, so the page loads from jsDelivr. The copies stay
   // because a developer who wants a map from one hostname should be able to have
   // that, and because saying "ours is slower" is only believable if ours exists.
-  for (const name of ["maplibre-gl.js", "maplibre-gl.css", "pmtiles.js"]) {
+  for (const name of ["maplibre-gl.js", "maplibre-gl.css", "pmtiles.js", "protomaps-leaflet.js"]) {
     assert.ok(existsSync(join(ROOT, "assets", "vendor", name)), `assets/vendor/${name} is missing`);
     assert.ok(existsSync(join(ROOT, "public", "vendor", name)), `public/vendor/${name} is missing`);
     assert.ok(manifest.has(`vendor/${name}`), `vendor/${name} has no digest`);
   }
   // And they are documented, with their licences.
-  for (const licence of ["maplibre-gl-LICENSE.txt", "pmtiles-LICENSE.txt"]) {
+  for (const licence of ["maplibre-gl-LICENSE.txt", "pmtiles-LICENSE.txt", "protomaps-leaflet-LICENSE.txt"]) {
     assert.ok(existsSync(join(ROOT, "public", "vendor", licence)), `${licence} is not published`);
   }
   // The page must actually render them, from the build's own list rather than a
@@ -139,7 +139,7 @@ await check("the libraries are vendored even though the CDN is faster", () => {
   // stale without anything failing.
   const index = JSON.parse(readFileSync(join(ROOT, "public", "styles", "index.json"), "utf8"));
   const listed = index.assets.libraries || [];
-  assert.equal(listed.length, 3, `index.json lists ${listed.length} libraries, expected 3`);
+  assert.equal(listed.length, 4, `index.json lists ${listed.length} libraries, expected 4`);
   for (const lib of listed) {
     assert.ok(existsSync(join(ROOT, "public", lib.path.replace(/^\//, ""))), `${lib.path} is listed but not published`);
   }
