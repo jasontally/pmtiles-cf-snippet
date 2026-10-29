@@ -397,14 +397,19 @@ export default {
     // including every crawler, gets a redirect, so the root is never a page that
     // varies by who is asking.
     if (url.pathname === "/") {
-      return new Response(null, {
-        status: 302,
-        headers: {
-          location: langPath(pickLanguage(request)),
-          "cache-control": "private, no-store",
-          vary: "Accept-Language, Cookie",
-        },
-      });
+      const picked = pickLanguage(request);
+      const headers = {
+        location: langPath(picked),
+        "cache-control": "private, no-store",
+        vary: "Accept-Language, Cookie",
+      };
+      if (url.searchParams.has("debug")) {
+        headers["x-debug-lang"] = picked;
+        headers["x-debug-cookie"] = request.headers.get("Cookie") || "(none)";
+        headers["x-debug-al"] = request.headers.get("Accept-Language") || "(none)";
+        headers["x-debug-langs"] = String(LANGS.length);
+      }
+      return new Response(null, { status: 302, headers });
     }
 
     // Any other path this rule matches is a language page; anything else is not
