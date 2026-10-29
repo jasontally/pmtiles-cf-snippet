@@ -62,6 +62,7 @@ import { Readable } from "node:stream";
 import {
   foreignRules, lostRules, mergeSnippetRule, rulesMatch, writable, WRITABLE,
 } from "./snippet-rules.mjs";
+import { buildAll, languages } from "./web/i18n/render.mjs";
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const PUBLIC_DIR = join(ROOT, "public");
@@ -607,7 +608,23 @@ function preloadRule() {
   const override = env("PRELOAD_SNIPPET_RULE", "");
   if (override) return override;
   const host = env("SNIPPET_HOST", "tiles.example.com");
-  return `(http.host eq "${host}" and http.request.uri.path eq "/" and not http.request.headers["x-tiles-preload"][0] eq "1")`;
+  // The root and every language page, because the preload links and the location
+  // hint belong on whichever page the visitor lands on. The root itself only
+  // redirects; it is in the list so the snippet answers it before the assets do.
+  const paths = ["/", ...languageCodes().map((code) => `/${code.toLowerCase()}/`)];
+  const anyPath = paths.map((path) => `http.request.uri.path eq "${path}"`).join(" or ");
+  return `(http.host eq "${host}" and (${anyPath}) and not http.request.headers["x-tiles-preload"][0] eq "1")`;
+}
+
+/** The language codes, from the one list the page build also uses. */
+function languageCodes() {
+  const file = join(ROOT, "web", "i18n", "languages.json");
+  return JSON.parse(readFileSync(file, "utf8")).map((lang) => lang.code);
+}
+
+/** Put the language list into the preload snippet, beside the other markers. */
+export function inlineLanguages(source) {
+  return source.replace('"__LANG_TABLE__"', JSON.stringify(languageCodes()));
 }
 
 /**
@@ -789,7 +806,7 @@ async function deploySnippet() {
   const snippets = [];
   for (const spec of specs) {
     const source = readFileSync(spec.sourcePath, "utf8");
-    const prepared = spec.inlineTable ? inlinePreloadMeta(inlinePreloadTable(source)) : source;
+    const prepared = spec.inlineTable ? inlineLanguages(inlinePreloadMeta(inlinePreloadTable(source))) : source;
     const snippet = await minifySnippet(spec.sourcePath, spec.name, prepared);
     console.log(`snippet ${spec.name}: ${Buffer.byteLength(snippet)} bytes`);
     snippets.push({ ...spec, code: snippet });
@@ -935,13 +952,14 @@ async function prepare() {
 }
 
 /**
- * Copy web/index.html to public/ and write the styles beside it.
+ * Render the help page in every language, plus the root chooser and the sitemap,
+ * and write the styles beside them.
  *
- * Both are needed on the same origin as the archive, because the styles point at
- * the archive by absolute URL and the page fetches styles/index.json relatively.
+ * The style URLs point at the archive absolutely, and the page now lives under a
+ * language directory, so nothing about the page may be relative to the document.
  */
 function writeDocs() {
-  step("write the documentation page");
+  step("write the documentation pages");
   const webDir = join(ROOT, "web");
   const page = join(webDir, "index.html");
   if (!existsSync(page)) {
@@ -949,8 +967,8 @@ function writeDocs() {
     return;
   }
   mkdirSync(PUBLIC_DIR, { recursive: true });
-  copyFileSync(page, join(PUBLIC_DIR, "index.html"));
-  console.log(`public/index.html (${statSync(page).size} bytes)`);
+  buildAll(PUBLIC_DIR);
+  console.log(`public/: ${languages.length} language pages, a chooser and a sitemap`);
 
   copyVendorAssets();
 

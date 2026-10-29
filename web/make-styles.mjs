@@ -1246,7 +1246,9 @@ function main() {
       id,
       label: p.name,
       swatch: p.swatch,
-      url: `styles/${id}.json`,
+      // Absolute: the page is served from /en/, /de/ and the rest, where a
+      // relative "styles/..." would resolve under the language directory.
+      url: `/styles/${id}.json`,
       style: `/styles/${id}.json`,
     })),
   };

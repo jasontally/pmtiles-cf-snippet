@@ -1,0 +1,12 @@
+import { shape } from './render.mjs';
+const en = (await import('./en.json', { with: { type: 'json' } })).default;
+const tr = (await import('./tr.json', { with: { type: 'json' } })).default;
+const k = '4c5fc5052e4b';
+const a = shape(en.fragments[k]);
+const b = shape(tr.fragments[k]);
+console.log('en tags:', a.tags.join('|'));
+console.log('tr tags:', b.tags.join('|'));
+console.log('en code:', a.code);
+console.log('tr code:', b.code);
+console.log('tags equal:', a.tags.join() === b.tags.join());
+console.log('code equal:', a.code.join() === b.code.join());

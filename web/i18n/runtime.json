@@ -1,0 +1,30 @@
+{
+  "meta.title": "Protomaps Basemap tiles — free, no API key",
+  "meta.description": "Free vector map tiles of the Protomaps Basemap, z0 to z15, served as a PMTiles archive. No API key, no rate limit, no service level guarantee. A drop-in replacement for blocked OpenStreetMap raster tiles in Leaflet and MapLibre.",
+  "ui.copy": "Copy",
+  "ui.copied": "Copied",
+  "ui.selectCopy": "Select and copy",
+  "ui.archiveTitle": "Archive metadata",
+  "ui.loading": "loading…",
+  "ui.readError": "could not read the archive: {error}",
+  "ui.startError": "failed to start: {error}",
+  "ui.zoomTitle": "zoom {zoom}. The archive holds z0 to z15, and a layer that starts above this one draws nothing.",
+  "ui.tileHint": "{n} tile request(s) failed, see the browser console",
+  "ui.toggleTitle": "{label} are drawn from zoom {zoom} upwards",
+  "ui.language": "Language",
+  "labels": {
+    "Land cover": "Land cover",
+    "Land use": "Land use",
+    "Water": "Water",
+    "Boundaries": "Boundaries",
+    "Roads": "Roads",
+    "Buildings": "Buildings",
+    "Place labels": "Place labels",
+    "Water names": "Water names",
+    "Road names": "Road names",
+    "Icons": "Icons",
+    "Background": "Background",
+    "Land": "Land",
+    "Boundaries and labels": "Boundaries and labels"
+  }
+}

@@ -345,3 +345,26 @@ await assert.rejects(
 assert.equal(attempts.length, 7, "the read retried on the network after the preload failed");
 
 console.log("preload snippet smoke tests passed");
+
+// i18n gateway: the neutral root redirects by saved choice, then Accept-Language.
+const { parseLangs, pickLanguage, langPath, pathLanguage } = await import("./preload-snippet.js");
+assert.deepEqual(parseLangs('["en","de"]'), ["en", "de"]);
+assert.deepEqual(parseLangs("not json"), []);
+assert.deepEqual(parseLangs("__LANG_TABLE__"), []);
+assert.equal(langPath("zh-Hans"), "/zh-hans/");
+assert.equal(pathLanguage("/de/", ["en","de"]), "de");
+assert.equal(pathLanguage("/en/", ["en","de"]), "en");
+assert.equal(pathLanguage("/x/", ["en","de"]), null);
+
+function req(cookie, al) {
+  return { headers: { get: (n) => n === "Cookie" ? cookie : n === "Accept-Language" ? al : null } };
+}
+assert.equal(pickLanguage(req("", "de-DE,de;q=0.9,en;q=0.8"), ["en","de"]), "de");
+assert.equal(pickLanguage(req("", "en-US,en;q=0.9"), ["en","de"]), "en");
+assert.equal(pickLanguage(req("lang=fr", "de"), ["en","de","fr"]), "fr");
+assert.equal(pickLanguage(req("lang=xx", "de"), ["en","de"]), "de");
+assert.equal(pickLanguage(req("", "zh-TW,zh;q=0.9"), ["en","zh-Hans","zh-Hant"]), "zh-Hant");
+assert.equal(pickLanguage(req("", "zh-CN"), ["en","zh-Hans","zh-Hant"]), "zh-Hans");
+assert.equal(pickLanguage(req("", "pt-BR"), ["en","pt"]), "pt");
+assert.equal(pickLanguage(req("", "es;q=0"), ["en","es"]), "en");
+assert.equal(pickLanguage(req("", ""), ["en","de"]), "en");

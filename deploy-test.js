@@ -581,15 +581,15 @@ await check("public/_headers is committed so the assets directory exists", () =>
 });
 
 await check("the sitemap names the served pages and robots.txt points at it", () => {
-  // Both files have no generator, so a build that loses them loses the crawl
-  // hints. The map root and the styles page are the only HTML pages.
+  // The sitemap is generated from the language set, so every language page is
+  // listed and the gateway is not: it is a redirect, not a page.
   const root = join(dirname(BUILD), "public");
   const sitemap = readFileSync(join(root, "sitemap.xml"), "utf8");
   const locs = [...sitemap.matchAll(/<loc>([^<]+)<\/loc>/g)].map((match) => match[1]);
-  assert.deepEqual(locs, [
-    "https://tiles.jasontally.com/",
-    "https://tiles.jasontally.com/styles/",
-  ]);
+  assert.ok(locs.includes("https://tiles.jasontally.com/en/"), "English is missing");
+  assert.ok(locs.includes("https://tiles.jasontally.com/styles/"), "the styles page is missing");
+  assert.ok(!locs.includes("https://tiles.jasontally.com/"), "the gateway must not be listed");
+  assert.equal(locs.length, 32, `expected 31 language pages plus styles, got ${locs.length}`);
   const robots = readFileSync(join(root, "robots.txt"), "utf8");
   assert.ok(
     robots.includes("Sitemap: https://tiles.jasontally.com/sitemap.xml"),

@@ -70,7 +70,7 @@
     margin: 0; background: var(--bg); color: var(--ink);
     font: 16px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
   }
-  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; }
+  .wrap { max-width: var(--max); margin: 0 auto; padding: 0 1.25rem 5rem; overflow-x: hidden; }
   code, pre, .mono { font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace; }
   a { color: var(--accent); }
 
@@ -93,7 +93,7 @@
      map itself shows. What remains is the two things a reader cannot see from
      looking at the map, plus the archive's range. */
   .facts li { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: .6rem .8rem; }
-  .facts b { display: inline; font-size: .95rem; margin-right: .4rem; }
+  .facts b { display: inline; font-size: .95rem; margin-inline-end: .4rem; }
   .facts span { color: var(--muted); font-size: .82rem; }
 
   section { margin-top: 3.5rem; }
@@ -112,12 +112,12 @@
   @media (prefers-color-scheme: dark) { pre .d { color: #e0806a; } pre .a { color: #7fc99a; } }
 
   /* map */
-  #map { position: relative; height: min(66vh, 34rem); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); }
+  #map { position: relative; height: min(66vh, 34rem); border-radius: 12px; overflow: hidden; border: 1px solid var(--line); direction: ltr; }
   /* One bar holding both sets of buttons. They used to be pinned to opposite
      corners, which collided as soon as the map got narrower than the sum of the
      two. Flex with wrap is the fix: they share a row when there is room and the
      tools drop to a second row when there is not. */
-  .mapbar { position: absolute; top: .6rem; left: .6rem; right: .6rem; z-index: 2; display: flex; flex-wrap: wrap; gap: .3rem; }
+  .mapbar { position: absolute; top: .6rem; inset-inline: .6rem; z-index: 2; display: flex; flex-wrap: wrap; gap: .3rem; }
   .flavors { display: flex; gap: .3rem; }
   .flavors button {
     display: flex; align-items: center; gap: .4rem; font: inherit; font-size: .85rem;
@@ -127,7 +127,7 @@
   }
   .flavors button[aria-pressed="true"] { background: #24231f; color: #fff; border-color: #24231f; }
   .flavors .dot { width: .7rem; height: .7rem; border-radius: 50%; border: 1px solid rgba(0,0,0,.25); }
-  .tools { display: flex; gap: .3rem; margin-left: auto; }
+  .tools { display: flex; gap: .3rem; margin-inline-start: auto; }
   .tools button {
     font: inherit; font-size: .85rem; padding: .35rem .7rem; border-radius: 999px; cursor: pointer;
     background: rgba(255,255,255,.94); color: #24231f; border: 1px solid rgba(0,0,0,.12);
@@ -137,14 +137,14 @@
      working shows nothing, which is the point: a pill over the corner of a map
      that is fine is clutter, and the one that was there repeated the hostname
      already in the URL bar and a rough location nobody asked to see. */
-  .maphint { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
+  .maphint { position: absolute; bottom: .6rem; inset-inline-start: .6rem; z-index: 2; background: rgba(20,20,20,.62); color: #fff;
     font-size: .78rem; padding: .25rem .6rem; border-radius: 999px; }
   .maphint:empty { display: none; }
 
   /* Zoom, bottom right, where a reader looking at the map expects it. Stacked the
      other way from a usual control, with the level between the two buttons, so the
      level is the thing and the buttons frame it. */
-  .zoomer { position: absolute; bottom: .6rem; left: .6rem; z-index: 2; display: flex;
+  .zoomer { position: absolute; bottom: .6rem; inset-inline-start: .6rem; z-index: 2; display: flex;
     align-items: center; gap: .1rem; background: rgba(255,255,255,.92); color: #24231f;
     border: 1px solid rgba(0,0,0,.12); border-radius: 999px; padding: .1rem;
     box-shadow: 0 1px 3px rgba(0,0,0,.18); font-size: .8rem; }
@@ -183,7 +183,7 @@
   .builder-toggles button[aria-pressed="false"] { opacity: .5; text-decoration: line-through; }
   /* The zoom a layer starts at. Small and quiet, but on the button rather than in
      a tooltip, because the whole problem is that nothing appears to happen. */
-  .builder-toggles .zmin { margin-left: .35rem; font-size: .72rem; opacity: .7; text-decoration: none; display: inline-block; }
+  .builder-toggles .zmin { margin-inline-start: .35rem; font-size: .72rem; opacity: .7; text-decoration: none; display: inline-block; }
   .builder-color-group { margin-top: .9rem; }
   .builder-color-group h4 { margin: 0 0 .45rem; font-size: .74rem; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); font-weight: 600; }
   .builder-colors-grid { display: grid; gap: .4rem; grid-template-columns: repeat(auto-fill, minmax(9.5rem, 1fr)); }
@@ -216,11 +216,36 @@
     cursor: pointer; background: var(--accent); color: #fff; border-color: transparent; }
 
   table { border-collapse: collapse; width: 100%; font-size: .9rem; }
-  th, td { text-align: left; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th, td { text-align: start; padding: .45rem .6rem; border-bottom: 1px solid var(--line); vertical-align: top; }
   th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); font-weight: 600; }
   td.mono, th.mono { font-size: .84rem; }
   .scroll { overflow-x: auto; }
-  .note { border-left: 3px solid var(--line); padding: .1rem 0 .1rem 1rem; color: var(--muted); }
+  .note { border-inline-start: 3px solid var(--line); padding: .1rem 0 .1rem 1rem; color: var(--muted); }
+  /* The page's own text follows the language's direction. Code and URLs do not:
+     a right-to-left page still has to read `https://...` from the left. */
+  pre, code, .mono, .url { direction: ltr; unicode-bidi: isolate; text-align: left; }
+  :lang(ar), :lang(fa), :lang(ur),
+  :lang(hi), :lang(bn), :lang(mr), :lang(gu), :lang(pa),
+  :lang(ta), :lang(te), :lang(kn), :lang(ml) { line-height: 1.75; }
+  [dir="rtl"] .quote { direction: ltr; text-align: left; }
+  /* Language menu. A list of links in a disclosure, so it works with no script:
+     the mac picker's 12px control, but every entry is a URL of its own. */
+  .lang-row { display: flex; justify-content: flex-end; margin: 0 0 .35rem; }
+  .lang { position: relative; font-size: .78rem; }
+  .lang summary { list-style: none; cursor: pointer; padding: .3rem .55rem; border: 1px solid var(--line);
+    border-radius: 999px; background: var(--panel); color: var(--ink); }
+  .lang summary::-webkit-details-marker { display: none; }
+  .lang summary::after { content: "▾"; margin-inline-start: .4rem; color: var(--muted); }
+  .lang[open] summary { border-color: var(--ink); }
+  .lang ul { position: absolute; inset-inline-end: 0; z-index: 5; margin: .35rem 0 0; padding: .35rem;
+    list-style: none; background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+    box-shadow: 0 8px 24px rgba(0,0,0,.12); display: grid; grid-template-columns: 1fr; gap: .1rem;
+    max-height: 70vh; overflow: auto; min-width: 12rem; }
+  @media (min-width: 40rem) { .lang ul { grid-template-columns: 1fr 1fr; min-width: 24rem; } }
+  .lang li a { display: block; padding: .3rem .45rem; border-radius: 6px; color: var(--ink);
+    text-decoration: none; white-space: nowrap; }
+  .lang li a:hover { background: var(--code-bg); }
+  .lang li a[aria-current="true"] { font-weight: 600; }
   /* The one line above the fold that leads somewhere else. It sits under the
      facts, so it is the last thing in the hero and the first thing a reader who
      came from a blocked map will notice. */
@@ -239,6 +264,7 @@
 <main class="wrap">
 
 <header class="hero">
+  <div class="lang-row"><!-- i18n:menu --></div>
   <h1>Protomaps Basemap tiles</h1>
   <p class="lede">
     The whole Protomaps Basemap, zoom 0 to 15, served as one PMTiles archive over
@@ -314,11 +340,11 @@
 
       <div class="builder-controls">
         <div class="builder-row">
-          <span class="builder-label">Start from</span>
+          <label class="builder-label">Start from</label>
           <span id="builder-flavors" class="builder-flavors"></span>
         </div>
         <div class="builder-row">
-          <span class="builder-label">Layers</span>
+          <label class="builder-label">Layers</label>
           <span id="builder-toggles" class="builder-toggles"></span>
         </div>
         <div id="builder-colors"></div>
@@ -660,9 +686,9 @@ console.log(tile.data.byteLength);</code></pre>
 
   <h3>Why the map shows a block</h3>
   <div class="quote">
-    <p>App is not following the tile usage policy of OpenStreetMap’s volunteer-run servers</p>
-    <p>General block: app is not following the tile usage policy of openstreetmap volunteer-run servers</p>
-    <p>403 Forbidden — tile.openstreetmap.org</p>
+    <p data-i18n-skip>App is not following the tile usage policy of OpenStreetMap’s volunteer-run servers</p>
+    <p data-i18n-skip>General block: app is not following the tile usage policy of openstreetmap volunteer-run servers</p>
+    <p data-i18n-skip>403 Forbidden — tile.openstreetmap.org</p>
   </div>
   <p>
     The tile servers sent that image instead of the map, on purpose, under
@@ -945,13 +971,27 @@ console.log(tile.data.byteLength);</code></pre>
   </div>
   <div class="dlg-body"><pre id="style-json"></pre></div>
 
+<!-- i18n:runtime -->
 <script type="module">
-import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/render-template.mjs";
+import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/render-template.mjs";
 
 (function () {
   "use strict";
   const TILES = "https://tiles.jasontally.com/basemap.pmtiles";
   const $ = (id) => document.getElementById(id);
+
+  // Strings the page builds at runtime. The static prose comes from the build,
+  // but the map hints, the copy button and the builder labels are written by
+  // this script, so they arrive as a table on the page.
+  const I18N = window.__I18N__ || { ui: {}, labels: {} };
+  const t = (key, params = {}) => {
+    let text = I18N.ui[key] ?? key;
+    for (const [name, value] of Object.entries(params)) {
+      text = text.replaceAll(`{${name}}`, String(value));
+    }
+    return text;
+  };
+  const lbl = (label) => I18N.labels[label] ?? label;
 
   let map = null;
   let flavors = [];
@@ -959,6 +999,29 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   // What the map is showing now, so an edit sends only what changed. Null until
   // the first apply, which is the one time a whole style is loaded.
   let appliedStyle = null;
+
+  // Language menu: remember an explicit choice for the gateway, and keep the
+  // disclosure usable. The links work without this; this only adds the memory.
+  const langMenu = document.querySelector(".lang");
+  if (langMenu) {
+    langMenu.addEventListener("click", (event) => {
+      const link = event.target.closest(".lang a");
+      if (!link) return;
+      const code = link.getAttribute("lang");
+      if (!code) return;
+      try { localStorage.setItem("tiles.lang", code); } catch (e) {}
+      document.cookie = "lang=" + code + "; path=/; max-age=31536000; SameSite=Lax; Secure";
+    });
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape" || !langMenu.open) return;
+      langMenu.open = false;
+      langMenu.querySelector("summary")?.focus();
+    });
+    document.addEventListener("click", (event) => {
+      if (langMenu.open && !langMenu.contains(event.target)) langMenu.open = false;
+    });
+  }
+
 
   // The one dialog. Up here rather than beside the viewers because apply() checks
   // whether it is open, and apply() is defined first.
@@ -991,8 +1054,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     const zoom = map.getZoom();
     const readout = $("zoom-readout");
     readout.textContent = zoom % 1 === 0 ? `z${zoom}` : `z${zoom.toFixed(1)}`;
-    readout.title = `zoom ${zoom.toFixed(1)}. The archive holds z0 to z15, ` +
-      `and a layer that starts above this one draws nothing.`;
+    readout.title = t("ui.zoomTitle", { zoom: zoom.toFixed(1) });
     $("zoom-in").disabled = zoom >= MAX_ZOOM - 0.001;
     $("zoom-out").disabled = zoom <= MIN_ZOOM + 0.001;
   }
@@ -1021,7 +1083,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   }
 
   async function boot() {
-    const index = await (await fetch("styles/index.json")).json();
+    const index = await (await fetch("/styles/index.json")).json();
     flavors = index.flavors;
     // The build says which style to open with, so there is one answer and not two
     // that can drift apart.
@@ -1117,7 +1179,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     map.on("idle", () => {
       // Nothing said when it works. A map that loads correctly needs no caption.
       if (failed() > 0) {
-        setHint(failed() + " tile request(s) failed, see the browser console");
+        setHint(t("ui.tileHint", { n: failed() }));
       }
     });
 
@@ -1205,7 +1267,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   };
 
   async function loadBuilder() {
-    builder.data = await (await fetch("styles/builder.json")).json();
+    builder.data = await (await fetch("/styles/builder.json")).json();
     buildBuilderUi();
     // The builder must open on the same flavour the map is showing, or the map
     // would change style behind the visitor as the page finishes loading.
@@ -1369,7 +1431,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       const marks = [];
       if (toggle.minzoom > 0) {
         marks.push("z" + toggle.minzoom + "+");
-        button.title = toggle.label + " are drawn from zoom " + toggle.minzoom + " upwards";
+        button.title = t("ui.toggleTitle", { label: lbl(toggle.label), zoom: toggle.minzoom });
       }
       if (marks.length) {
         button.append(toggle.label, Object.assign(document.createElement("span"), {
@@ -1377,7 +1439,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
           textContent: marks.join(" "),
         }));
       } else {
-        button.textContent = toggle.label;
+        button.textContent = lbl(toggle.label);
       }
       button.setAttribute("aria-pressed", "true");
       button.addEventListener("click", () => {
@@ -1403,7 +1465,7 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
       const wrap = document.createElement("div");
       wrap.className = "builder-color-group";
       const heading = document.createElement("h4");
-      heading.textContent = group.group;
+      heading.textContent = lbl(group.group);
       const grid = document.createElement("div");
       grid.className = "builder-colors-grid";
       for (const key of group.keys) {
@@ -1565,12 +1627,12 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
     const text = $("style-json").textContent;
     try {
       await navigator.clipboard.writeText(text);
-      $("style-copy").textContent = "Copied";
-      setTimeout(() => { $("style-copy").textContent = "Copy"; }, 1500);
+      $("style-copy").textContent = t("ui.copied");
+      setTimeout(() => { $("style-copy").textContent = t("ui.copy"); }, 1500);
     } catch {
       // Clipboard needs a secure context and permission. Say so rather than
       // leaving the button that looks inert.
-      $("style-copy").textContent = "Select and copy";
+      $("style-copy").textContent = t("ui.selectCopy");
       const range = document.createRange();
       range.selectNodeContents($("style-json"));
       const selection = getSelection();
@@ -1580,9 +1642,9 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
   });
 
   $("show-meta").addEventListener("click", async () => {
-    $("style-title").textContent = "Archive metadata";
+    $("style-title").textContent = t("ui.archiveTitle");
     $("style-raw").removeAttribute("href");
-    $("style-json").textContent = "loading…";
+    $("style-json").textContent = t("ui.loading");
     dialog.showModal();
     try {
       const source = archive || new pmtiles.PMTiles(new pmtiles.FetchSource(TILES));
@@ -1598,13 +1660,13 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "./styles/re
         metadata
       }, null, 2);
     } catch (error) {
-      $("style-json").textContent = "could not read the archive: " + error;
+      $("style-json").textContent = t("ui.readError", { error });
     }
   });
   $("style-close").addEventListener("click", () => dialog.close());
 
   boot().catch((error) => {
-    setHint("failed to start: " + error);
+    setHint(t("ui.startError", { error }));
     console.error(error);
   });
 })();

@@ -19,6 +19,74 @@
 const TABLE = "__PRELOAD_TABLE__";
 const META_TEXT = "__PRELOAD_META__";
 
+/**
+ * The language codes, inlined from web/i18n/languages.json at deploy. The same
+ * list decides the root redirect and which paths carry the preload injection.
+ */
+const LANG_TEXT = "__LANG_TABLE__";
+const DEFAULT_LANG = "en";
+
+export function parseLangs(text) {
+  try {
+    const value = JSON.parse(text);
+    if (!Array.isArray(value)) return [];
+    return value.filter((code) => typeof code === "string" && /^[A-Za-z-]+$/.test(code));
+  } catch {
+    return [];
+  }
+}
+
+const LANGS = parseLangs(LANG_TEXT);
+
+/** The language a request asks for, from the cookie first, then the header. */
+export function pickLanguage(request, langs = LANGS) {
+  if (!langs.length) return DEFAULT_LANG;
+  const exact = (tag) => langs.find((code) => code.toLowerCase() === tag);
+
+  const cookie = request.headers.get("Cookie") || "";
+  const saved = /(?:^|;\s*)lang=([A-Za-z-]+)/.exec(cookie);
+  if (saved) {
+    const code = exact(saved[1].toLowerCase());
+    if (code) return code;
+  }
+
+  const ranked = (request.headers.get("Accept-Language") || "")
+    .split(",")
+    .map((part) => {
+      const [tag, ...params] = part.trim().split(";");
+      const q = params.map((p) => p.trim()).find((p) => p.startsWith("q="));
+      const weight = q ? Number(q.slice(2)) : 1;
+      return { tag: tag.trim().toLowerCase(), weight: Number.isFinite(weight) ? weight : 0 };
+    })
+    .filter((entry) => entry.tag && entry.weight > 0 && entry.tag !== "*")
+    .sort((a, b) => b.weight - a.weight);
+
+  for (const { tag } of ranked) {
+    if (tag.startsWith("zh")) {
+      const want = /hant|hk|tw|mo/.test(tag) ? "zh-Hant" : "zh-Hans";
+      return exact(want.toLowerCase()) || DEFAULT_LANG;
+    }
+    const whole = exact(tag);
+    if (whole) return whole;
+    const base = exact(tag.split("-")[0]);
+    if (base) return base;
+  }
+  return DEFAULT_LANG;
+}
+
+/** The path for a code: /zh-Hans becomes /zh-hans/. */
+export function langPath(code) {
+  return `/${code.toLowerCase()}/`;
+}
+
+/** The language a path names, or null. */
+export function pathLanguage(pathname, langs = LANGS) {
+  if (!langs.length) return pathname === "/en/" ? "en" : null;
+  const lower = pathname.toLowerCase();
+  const code = langs.find((entry) => langPath(entry) === lower);
+  return code || null;
+}
+
 // The rule excludes this header. A request with it reaches the origin without
 // running this snippet again, so the origin fetch cannot loop back into itself.
 const INTERNAL = "x-tiles-preload";
@@ -323,7 +391,25 @@ export function headInjection(lat, lon, { meta = META, tiles = TILES } = {}) {
 export default {
   async fetch(request) {
     const url = new URL(request.url);
-    if (url.pathname !== "/") return fetch(request);
+
+    // The neutral root: one temporary redirect to the language the visitor chose
+    // last, else the one their browser asks for, else English. Every visitor,
+    // including every crawler, gets a redirect, so the root is never a page that
+    // varies by who is asking.
+    if (url.pathname === "/") {
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: langPath(pickLanguage(request)),
+          "cache-control": "private, no-store",
+          vary: "Accept-Language, Cookie",
+        },
+      });
+    }
+
+    // Any other path this rule matches is a language page; anything else is not
+    // ours and goes to the asset untouched.
+    if (!pathLanguage(url.pathname)) return fetch(request);
     // The nested fetch after the snippet adds this header does not match the
     // snippet rule, so it reaches the asset rather than re-entering the snippet.
     if (request.headers.get(INTERNAL) === "1") return fetch(request);

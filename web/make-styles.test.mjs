@@ -434,7 +434,7 @@ await check("the zoom control yields the corner to an error message", () => {
   // message that says the tiles failed matters more than a number.
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   assert.ok(page.includes('id="zoomer"'), "the zoom control has no id to address");
-  assert.ok(/\.zoomer \{[^}]*bottom: \.6rem; left: \.6rem/.test(page),
+  assert.ok(/\.zoomer \{[^}]*bottom: \.6rem; inset-inline-start: \.6rem/.test(page),
     "the zoom control is not in the lower left corner");
   assert.ok(page.includes(".zoomer.yielding"), "the zoom control cannot be hidden");
   assert.ok(/classList\.toggle\("yielding", Boolean\(text\)\)/.test(page),
