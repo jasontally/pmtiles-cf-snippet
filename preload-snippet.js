@@ -27,6 +27,9 @@ const LANG_TEXT = "__LANG_TABLE__";
 const DEFAULT_LANG = "en";
 
 export function parseLangs(text) {
+  if (Array.isArray(text)) {
+    return text.filter((code) => typeof code === "string" && /^[A-Za-z-]+$/.test(code));
+  }
   try {
     const value = JSON.parse(text);
     if (!Array.isArray(value)) return [];
@@ -397,19 +400,14 @@ export default {
     // including every crawler, gets a redirect, so the root is never a page that
     // varies by who is asking.
     if (url.pathname === "/") {
-      const picked = pickLanguage(request);
-      const headers = {
-        location: langPath(picked),
-        "cache-control": "private, no-store",
-        vary: "Accept-Language, Cookie",
-      };
-      if (url.searchParams.has("debug")) {
-        headers["x-debug-lang"] = picked;
-        headers["x-debug-cookie"] = request.headers.get("Cookie") || "(none)";
-        headers["x-debug-al"] = request.headers.get("Accept-Language") || "(none)";
-        headers["x-debug-langs"] = String(LANGS.length);
-      }
-      return new Response(null, { status: 302, headers });
+      return new Response(null, {
+        status: 302,
+        headers: {
+          location: langPath(pickLanguage(request)),
+          "cache-control": "private, no-store",
+          vary: "Accept-Language, Cookie",
+        },
+      });
     }
 
     // Any other path this rule matches is a language page; anything else is not
