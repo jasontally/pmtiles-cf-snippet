@@ -118,7 +118,13 @@ const HEADERS_FILE =
   "/robots.txt\n" +
   "\tCache-Control: public, max-age=86400\n" +
   "/sitemap.xml\n" +
-  "\tCache-Control: public, max-age=86400\n";
+  "\tCache-Control: public, max-age=86400\n" +
+  // Discovery headers for agents (RFC 8288). Applies to the chooser and the
+  // English page that the agent-readiness scan targets.
+  "/\n" +
+  "\tLink: </sitemap.xml>; rel=\"sitemap\", </.well-known/ai-catalog.json>; rel=\"describedby\", <https://github.com/jasontally/pmtiles-cf-snippet>; rel=\"service-doc\"\n" +
+  "/en/\n" +
+  "\tLink: </sitemap.xml>; rel=\"sitemap\", </.well-known/ai-catalog.json>; rel=\"describedby\", <https://github.com/jasontally/pmtiles-cf-snippet>; rel=\"service-doc\"\n";
 
 const env = (key, fallback) => {
   const value = process.env[key];

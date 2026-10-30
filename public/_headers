@@ -22,3 +22,7 @@
 	Cache-Control: public, max-age=86400
 /sitemap.xml
 	Cache-Control: public, max-age=86400
+/
+	Link: </sitemap.xml>; rel="sitemap", </.well-known/ai-catalog.json>; rel="describedby", <https://github.com/jasontally/pmtiles-cf-snippet>; rel="service-doc"
+/en/
+	Link: </sitemap.xml>; rel="sitemap", </.well-known/ai-catalog.json>; rel="describedby", <https://github.com/jasontally/pmtiles-cf-snippet>; rel="service-doc"

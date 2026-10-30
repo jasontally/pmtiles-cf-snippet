@@ -6,6 +6,8 @@ public/*
 !public/_headers
 !public/robots.txt
 !public/sitemap.xml
+!public/.well-known/
+!public/.well-known/**
 
 # The minified snippet, written by the build.
 dist/

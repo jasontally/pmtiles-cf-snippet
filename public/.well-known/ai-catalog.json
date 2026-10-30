@@ -1,0 +1,17 @@
+{
+  "specVersion": "1.0",
+  "host": {
+    "displayName": "tiles.jasontally.com",
+    "identifier": "did:web:tiles.jasontally.com"
+  },
+  "entries": [
+    {
+      "identifier": "urn:ai:tiles.jasontally.com:dataset:basemap",
+      "displayName": "Protomaps Basemap PMTiles",
+      "type": "application/x-pmtiles",
+      "url": "https://tiles.jasontally.com/basemap.pmtiles",
+      "description": "Free vector map tiles of the Protomaps Basemap, zoom 0 to 15, served as a PMTiles archive. Fetch with HTTP range requests. No API key required.",
+      "capabilities": ["map-tiles", "vector-tiles", "pmtiles"]
+    }
+  ]
+}

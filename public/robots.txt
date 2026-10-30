@@ -3,5 +3,6 @@ Allow: /
 Disallow: /preload/
 Disallow: /s/
 Disallow: /*.pmtiles
+Content-Signal: ai-train=yes, search=yes, ai-input=yes
 
 Sitemap: https://tiles.jasontally.com/sitemap.xml

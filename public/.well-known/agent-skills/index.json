@@ -1,0 +1,12 @@
+{
+  "$schema": "https://schemas.agentskills.io/discovery/0.2.0/schema.json",
+  "skills": [
+    {
+      "name": "protomaps-basemap-tiles",
+      "type": "skill-md",
+      "description": "Use free Protomaps Basemap vector tiles (z0-z15) served as a PMTiles archive.",
+      "url": "https://tiles.jasontally.com/.well-known/agent-skills/tiles/SKILL.md",
+      "digest": "sha256:15c536d2efa134a86ee388cc0bd29734785ec14fe2acab9da7603aeb05f651b2"
+    }
+  ]
+}
