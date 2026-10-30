@@ -6,6 +6,7 @@ public/*
 !public/_headers
 !public/robots.txt
 !public/sitemap.xml
+!public/auth.md
 !public/.well-known/
 !public/.well-known/**
 

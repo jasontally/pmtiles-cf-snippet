@@ -1,0 +1,37 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Protomaps Basemap PMTiles",
+    "version": "1.0.0",
+    "description": "Free vector map tiles of the Protomaps Basemap, zoom 0 to 15, served as a single PMTiles archive. Clients fetch the archive with HTTP GET requests and HTTP Range requests. No authentication is required."
+  },
+  "paths": {
+    "/basemap.pmtiles": {
+      "get": {
+        "summary": "Fetch the PMTiles archive or a byte range",
+        "parameters": [
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            },
+            "description": "HTTP byte range, for example bytes=0-16383."
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Full archive response."
+          },
+          "206": {
+            "description": "Partial content response for a range request."
+          },
+          "416": {
+            "description": "Requested range not satisfiable."
+          }
+        }
+      }
+    }
+  }
+}

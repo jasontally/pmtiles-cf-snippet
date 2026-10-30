@@ -1,0 +1,24 @@
+{
+  "linkset": [
+    {
+      "anchor": "https://tiles.jasontally.com/.well-known/api-catalog",
+      "item": [
+        {
+          "href": "https://tiles.jasontally.com/basemap.pmtiles"
+        }
+      ],
+      "service-desc": [
+        {
+          "href": "https://tiles.jasontally.com/.well-known/openapi.json",
+          "type": "application/json"
+        }
+      ],
+      "service-doc": [
+        {
+          "href": "https://github.com/jasontally/pmtiles-cf-snippet",
+          "type": "text/html"
+        }
+      ]
+    }
+  ]
+}
