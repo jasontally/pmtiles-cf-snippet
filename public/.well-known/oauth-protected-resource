@@ -1,0 +1,6 @@
+{
+  "resource": "https://tiles.jasontally.com/",
+  "authorization_servers": [],
+  "scopes_supported": ["public"],
+  "bearer_methods_supported": ["header"]
+}
