@@ -1,0 +1,1 @@
+export default { async fetch() { const r = await fetch("https://s.tiles0.jasontally.com/s/basemap/tile/000001.bin"); await r.body.cancel(); return new Response(new Uint8Array(200), { status: 206 }); } };

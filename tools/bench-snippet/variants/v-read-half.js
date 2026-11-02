@@ -1,0 +1,1 @@
+export default { async fetch() { const r = await fetch("https://s.tiles0.jasontally.com/s/basemap/tile/000001.bin"); const rd = r.body.getReader(); let n = 0; while (n < 500000) { const { value, done } = await rd.read(); if (done) break; n += value.length; } await rd.cancel(); return new Response(new Uint8Array(200), { status: 206 }); } };
