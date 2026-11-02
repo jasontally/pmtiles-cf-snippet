@@ -396,6 +396,111 @@ async function main() {
     }
   });
 
+  /**
+   * Serve the split archive, but let `script(call)` replace the answer to a
+   * call. Return undefined from it to serve the real asset.
+   */
+  const getFlaky = async (range, script) => {
+    const stats = { calls: 0, ranges: [] };
+    const serve = makeFetch(assets, stats);
+    globalThis.fetch = async (target, init) => {
+      const failure = await script(stats.calls + 1);
+      if (failure !== undefined) {
+        stats.calls++;
+        if (failure instanceof Error) throw failure;
+        return failure;
+      }
+      return serve(target, init);
+    };
+    try {
+      const response = await handler.fetch(request(range), { env: {} }, { env: {} });
+      const body = new Uint8Array(await response.arrayBuffer());
+      return { response, body, stats };
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  };
+
+  await checkAsync("a streamed part arriving in 4 KiB chunks is cut at the right bytes", async () => {
+    // workerd hands a fetch body over in 4 KiB chunks. Put answers on and around
+    // the 64 KiB scratch buffer edges, so one answer spans two reads.
+    const stats = { calls: 0, pulled: 0 };
+    globalThis.fetch = async (target) => {
+      stats.calls++;
+      const part = assets[new URL(target).pathname.replace(/^\/s\/demo\//, "")];
+      let at = 0;
+      const stream = new ReadableStream({
+        type: "bytes",
+        pull(controller) {
+          if (at >= part.length) return controller.close();
+          controller.enqueue(part.slice(at, at + 4096));
+          at += 4096;
+          stats.pulled += 4096;
+        },
+      });
+      return new Response(stream, { status: 200, headers: { "Content-Length": String(part.length) } });
+    };
+    try {
+      for (const inPart of [0, 65535, 65536 - 100, 65536, 131071, 700001, 1999000]) {
+        const at = HEAD_BYTES + inPart;
+        const response = await handler.fetch(request(`bytes=${at}-${at + 301}`), { env: {} }, { env: {} });
+        const body = new Uint8Array(await response.arrayBuffer());
+        assert.equal(response.status, 206, `offset ${inPart}`);
+        assert.deepEqual(body, bytes.subarray(at, at + 302), `offset ${inPart}`);
+      }
+
+      // The read must stop once the answer is in, not drain the 2 MB part.
+      stats.pulled = 0;
+      const at = HEAD_BYTES + 5000;
+      await (await handler.fetch(request(`bytes=${at}-${at + 301}`), { env: {} }, { env: {} })).arrayBuffer();
+      assert.ok(stats.pulled < 200000, `pulled ${stats.pulled} bytes for an answer at offset 5000`);
+    } finally {
+      globalThis.fetch = realFetch;
+    }
+  });
+
+  const tileAt = HEAD_BYTES + 1234567;
+  const tileRange = `bytes=${tileAt}-${tileAt + 201}`;
+
+  await checkAsync("a single part read retries once after a thrown fetch error", async () => {
+    const { response, body, stats } = await getFlaky(tileRange, (call) =>
+      call === 1 ? new Error("network lost") : undefined
+    );
+    assert.equal(response.status, 206);
+    assert.deepEqual(body, bytes.subarray(tileAt, tileAt + 202));
+    assert.equal(stats.calls, 2);
+  });
+
+  await checkAsync("a single part read retries once after a 503", async () => {
+    const { response, body, stats } = await getFlaky(tileRange, (call) =>
+      call === 1 ? new Response("busy", { status: 503 }) : undefined
+    );
+    assert.equal(response.status, 206);
+    assert.deepEqual(body, bytes.subarray(tileAt, tileAt + 202));
+    assert.equal(stats.calls, 2);
+  });
+
+  await checkAsync("a read that keeps failing stops after 2 subrequests", async () => {
+    const { response, stats } = await getFlaky(tileRange, () => new Response("busy", { status: 503 }));
+    assert.equal(response.status, 502);
+    assert.equal(stats.calls, 2);
+  });
+
+  await checkAsync("a 404 is not retried", async () => {
+    const { response, stats } = await getFlaky(tileRange, () => new Response("gone", { status: 404 }));
+    assert.equal(response.status, 502);
+    assert.equal(stats.calls, 1);
+  });
+
+  await checkAsync("a two part read never spends a third subrequest", async () => {
+    const start = HEAD_BYTES + modules.tileShard - 100;
+    const { response, stats } = await getFlaky(`bytes=${start}-${start + 300}`, (call) =>
+      call === 1 ? new Response("busy", { status: 503 }) : undefined
+    );
+    assert.equal(response.status, 502);
+    assert.equal(stats.calls, 2, "both parts are read once, with no retry");
+  });
+
   /* ------------------------------------------------------------------ *
    * Sharded routing.
    * ------------------------------------------------------------------ */

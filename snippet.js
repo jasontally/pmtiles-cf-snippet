@@ -67,6 +67,11 @@ const MAX_RESPONSE = 524288;
 // the bytes the client asked for. head, meta and leaf parts are all under it
 // and are still read in one piece.
 const BUFFER_LIMIT = 524288;
+// Size of the reusable buffer readSlice reads into. A default reader gets 4 KiB
+// chunks in workerd, so skipping to the middle of a part cost ~120 reads and
+// ~2.6 ms of CPU, half the 5 ms budget. A 64 KiB buffer needs ~13 reads and
+// ~0.8 ms. Larger buffers gain nothing (256 KiB: 0.73 ms) and cost memory.
+const SCRATCH_BYTES = 65536;
 
 // The shard host names. Written as a pattern because the index is the only
 // thing that changes, and the index is computed, never stored.
@@ -136,8 +141,10 @@ export default {
       try {
         // The parts are read together so a two part request costs one round
         // trip in parallel, not two in series.
+        // A single part read leaves one subrequest spare, which fetchPart spends
+        // on one retry. A two part read has none.
         const chunks = await Promise.all(
-          reads.map((read) => fetchPart(name, archive, read))
+          reads.map((read) => fetchPart(name, archive, read, reads.length === 1))
         );
         for (const chunk of chunks) {
           body.set(chunk, written);
@@ -263,6 +270,23 @@ export function planReads(start, end, archive) {
 }
 
 /**
+ * fetchPartOnce, retried once when `canRetry` and the failure may be transient.
+ * A 4xx is final: the part is missing, and asking again costs a subrequest for
+ * the same answer. A thrown fetch error or a 5xx is worth one more try.
+ *
+ * Ceiling: the retry starts after the failure, so it adds a full round trip to
+ * the slowest requests. It does not hedge a slow shard, only a failed one.
+ */
+async function fetchPart(name, archive, read, canRetry) {
+  try {
+    return await fetchPartOnce(name, archive, read);
+  } catch (error) {
+    if (!canRetry || error.retry === false) throw error;
+    return fetchPartOnce(name, archive, read);
+  }
+}
+
+/**
  * Fetch one asset from its shard and cut out the requested bytes.
  *
  * Static Assets ignore the Range header, so this reads the whole part and
@@ -283,13 +307,15 @@ export function planReads(start, end, archive) {
  * The cost falls as the part size falls, and the file count rises. Measured at
  * 2,000,000 B: a part read is 0.25 s from the edge with 0.11 s to first byte.
  */
-async function fetchPart(name, archive, read) {
+async function fetchPartOnce(name, archive, read) {
   const file = assetFile(read.kind, read.index);
   const target = assetUrl(name, read.host, read.kind, read.index);
 
   const response = await fetch(target);
   if (response.status !== 200) {
-    throw new Error(`${file} on shard ${read.host} returned ${response.status}`);
+    const error = new Error(`${file} on shard ${read.host} returned ${response.status}`);
+    error.retry = response.status >= 500;
+    throw error;
   }
 
   const partSize = Number(response.headers.get("Content-Length") || "0");
@@ -307,18 +333,21 @@ async function fetchPart(name, archive, read) {
 
 /**
  * Read only the needed bytes of a large part, without holding the whole part.
- * Keeps memory at the size of the answer plus one network chunk.
+ * Keeps memory at the size of the answer plus one SCRATCH_BYTES buffer.
  */
 async function readSlice(response, read, file) {
   const wanted = new Uint8Array(read.length);
-  const reader = response.body.getReader();
+  const reader = response.body.getReader({ mode: "byob" });
+  let scratch = new ArrayBuffer(SCRATCH_BYTES);
   let position = 0;
   let copied = 0;
 
   try {
     while (copied < wanted.length) {
-      const { value, done } = await reader.read();
+      const { value, done } = await reader.read(new Uint8Array(scratch));
       if (done) break;
+      // A BYOB read transfers the buffer. Take it back for the next read.
+      scratch = value.buffer;
       // Skip the part before the answer, then copy, then stop reading.
       const chunkStart = position;
       const chunkEnd = position + value.length;
@@ -333,7 +362,8 @@ async function readSlice(response, read, file) {
   } finally {
     // Stop the transfer as soon as the answer is complete. Without this the
     // whole part would arrive at the edge.
-    await reader.cancel();
+    // A failed cancel must not hide the error that got us here.
+    await reader.cancel().catch(() => {});
   }
 
   if (copied !== read.length) {
