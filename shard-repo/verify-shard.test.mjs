@@ -17,7 +17,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { ORDER, slotFor, verifyFor } from "./render-workflow.mjs";
-import { checkShard, partsFor, partOffset, partUrl } from "./verify-shard.mjs";
+import { checkShard, decide, partsFor, partOffset, partUrl, readHeader } from "./verify-shard.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -176,6 +176,62 @@ await check("a shard with the wrong bytes fails the check", async () => {
   });
   assert.ok(!result.ok, "the check passed a shard with the wrong bytes");
   assert.ok(/does not hold the archive bytes/.test(result.reason), result.reason);
+});
+
+/**
+ * A source archive Protomaps removed. On 2026-11-07 every shard's archive.json
+ * named 20261031.pmtiles, which returned 404, and the check threw instead of
+ * reporting. It must now report and leave the shard alone.
+ */
+await check("a removed source archive is reported, not thrown", async () => {
+  for (const status of [404, 410]) {
+    const headerResult = await readHeader("https://example.test/gone", async () =>
+      new Response("not found", { status })
+    );
+    assert.equal(headerResult.gone, true, `a ${status} must count as gone`);
+    assert.equal(headerResult.status, status, "the status is kept for the message");
+  }
+});
+
+await check("a removed source archive starts no build and changes nothing", () => {
+  const archive = { key: "20261031.pmtiles", url: "https://example.test/20261031.pmtiles", attempts: 0 };
+  const outcome = decide({
+    archive,
+    headerResult: { gone: true, status: 404 },
+    shardResult: { ok: false, reason: "the source archive is gone" },
+  });
+  assert.equal(outcome.exitCode, 0, "it must not fail the workflow");
+  assert.ok(!outcome.stale, "a gone archive is not a stale shard, so no attempt is counted");
+  assert.ok(/no longer hosted/.test(outcome.message), outcome.message);
+  assert.ok(outcome.message.includes(archive.url), "the message names the archive");
+});
+
+await check("a server fault still fails the check", async () => {
+  await assert.rejects(
+    () => readHeader("https://example.test/500", async () => new Response("boom", { status: 500 })),
+    /returned 500/,
+    "a 500 is worth failing on"
+  );
+});
+
+await check("a shard that holds the archive is not stale", () => {
+  const outcome = decide({
+    archive: { key: "20261101.pmtiles", url: "https://example.test/20261101.pmtiles" },
+    headerResult: { header: {} },
+    shardResult: { ok: true, part: 5555 },
+  });
+  assert.equal(outcome.exitCode, 0);
+  assert.ok(!outcome.stale, "a good shard must not start a build");
+  assert.ok(/5555/.test(outcome.message), outcome.message);
+});
+
+await check("a stale shard is still retried", () => {
+  const outcome = decide({
+    archive: { key: "20261101.pmtiles", url: "https://example.test/20261101.pmtiles" },
+    headerResult: { header: {} },
+    shardResult: { ok: false, reason: "the shard does not serve part 5555" },
+  });
+  assert.equal(outcome.stale, true, "a shard missing the part must be rebuilt");
 });
 
 console.log(`${passed} passed, ${failed} failed`);

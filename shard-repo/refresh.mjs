@@ -17,8 +17,8 @@
  * window and some shards had already run. The answer is therefore anchored to a
  * fixed point:
  *
- *   target = the newest Protomaps build published BEFORE 00:30 UTC on the first
- *            Sunday of the current month
+ *   target = the newest Protomaps build published BEFORE (00:30 UTC on the first
+ *            Sunday of the current month) minus SETTLE_DAYS
  *
  * Every repo computes the same anchor, so every repo computes the same target,
  * whichever minute of the window it happens to run at. A build that appears
@@ -26,6 +26,23 @@
  * cadence: one new archive a month, so browsers and the CDN are not asked to
  * throw away their cached parts every week, and 25 shard builds are not spent
  * on data nobody has had time to change.
+ *
+ * WHY THE BUILD MUST SETTLE BEFORE WE TAKE IT
+ *
+ * Protomaps removes builds. On 2026-11-07 the build every shard took on
+ * 1 November, 20261031.pmtiles, returned 404. It had been listed for six days.
+ * A build that Protomaps pulls is a build with a problem, and the removals in
+ * 25 snapshots of builds.json (2023-10 to 2026-08, see refresh.md) say how
+ * long a bad build lasts: of the 30 removals bracketed by snapshots ten days
+ * apart or less, every one was gone within 14 days of upload, and the median
+ * was 9 days. Removals come in bursts: a run of daily builds is listed, then
+ * all of it vanishes at once.
+ *
+ * So the target is a build that has been listed for SETTLE_DAYS before the
+ * anchor. Users have that time to report a bad build, and Protomaps has that
+ * time to pull it. The gap is measured from the anchor, never from the clock,
+ * so a retry on a later Sunday still computes the same target as the shards
+ * that ran on the first Sunday.
  *
  * Later Sundays still run, and still compute the same target. That is what
  * retries a shard that failed on the first Sunday: the key it holds is not the
@@ -54,8 +71,16 @@ const WINDOW_HOUR_UTC = 0;
 const WINDOW_MINUTE_UTC = 30;
 
 /**
+ * A build must have been published this long before the anchor before we cut
+ * parts from it. This is the gap in which a bad build gets reported and pulled.
+ * See the header for the removal data this number comes from.
+ */
+export const SETTLE_DAYS = 14;
+
+/**
  * A build must have been published this long before we cut parts from it. The
- * anchor already keeps it days old, so this is a second line of defence.
+ * anchor and SETTLE_DAYS already keep it weeks old, so this is a second line of
+ * defence.
  */
 const MIN_AGE_HOURS = 4;
 
@@ -99,14 +124,56 @@ export function windowOpen(now = new Date()) {
   return open;
 }
 
-/** The newest build published before the anchor. */
-export function pickTarget(builds, now = new Date()) {
+/**
+ * The moment the target must have been published by: the anchor less the
+ * settle gap. Measured from the anchor and not from the clock, so every shard
+ * agrees even when a retry runs a week later.
+ */
+export function settleCutoff(now = new Date()) {
   const open = windowOpen(now);
-  const eligible = builds
-    .filter((build) => new Date(build.uploaded).getTime() < open.getTime())
-    .sort((a, b) => (a.key < b.key ? -1 : 1));
-  if (!eligible.length) return null;
-  return { ...eligible[eligible.length - 1], windowOpen: open.toISOString() };
+  return new Date(open.getTime() - SETTLE_DAYS * 86_400_000);
+}
+
+/** The newest build published before the settle cutoff. */
+export function pickTarget(builds, now = new Date()) {
+  const [newest] = candidates(builds, now);
+  if (!newest) return null;
+  return {
+    ...newest,
+    windowOpen: windowOpen(now).toISOString(),
+    settleCutoff: settleCutoff(now).toISOString(),
+  };
+}
+
+/**
+ * The candidate builds to try, newest first.
+ *
+ * The newest build before the cutoff may already have been removed. A removed
+ * build is not in builds.json, but builds.json can lag storage, so the caller
+ * confirms each candidate with a Range request before it commits.
+ */
+export function candidates(builds, now = new Date()) {
+  const cutoff = settleCutoff(now);
+  return builds
+    .filter((build) => new Date(build.uploaded).getTime() < cutoff.getTime())
+    .sort((a, b) => (a.key < b.key ? 1 : -1));
+}
+
+/**
+ * Is the build still served? A removed build answers 404 or 403.
+ *
+ * One byte is enough. The probe must not be a HEAD request: on 2026-11-07 a
+ * HEAD to build.protomaps.com answered 200 for a file a ranged GET answered 206
+ * for, and Python's urllib answered 403 for every file. Only a ranged GET says
+ * what the shard build itself will see.
+ */
+export async function isServed(url, fetchImpl = fetch) {
+  try {
+    const response = await fetchImpl(url, { headers: { Range: "bytes=0-0" } });
+    return response.status === 206;
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -157,6 +224,7 @@ async function main() {
   if (!Array.isArray(builds) || !builds.length) fail("no builds listed");
 
   const now = new Date();
+  const cutoff = settleCutoff(now);
   const target = pickTarget(builds, now);
   if (!target) fail("no Protomaps build was published before the window opened");
 
@@ -164,10 +232,39 @@ async function main() {
   const ageHours = (now.getTime() - new Date(target.uploaded).getTime()) / 3600000;
 
   console.log(`window    ${target.windowOpen} UTC, the first Sunday of the month, the anchor every shard uses`);
+  console.log(`settle    ${cutoff.toISOString()} UTC, ${SETTLE_DAYS} days before the anchor`);
   console.log(`newest    ${newestKey(builds)}`);
   console.log(`target    ${target.key}  ${(target.size / 1e9).toFixed(1)} GB  ` +
     `published ${target.uploaded}  ${ageHours.toFixed(1)} h ago`);
   console.log(`holding   ${held ?? "nothing"}`);
+
+  // builds.json can list a build that storage no longer serves. The 1 November
+  // 2026 refresh took 20261031.pmtiles on the listing alone, and by 7 November
+  // it answered 404. Confirm the bytes are there before committing a key.
+  //
+  // The probe runs only when a key would be written. When the shard already
+  // holds the target, or holds a newer build that the downgrade guard keeps,
+  // there is nothing to commit, so the probe would spend a request and change
+  // nothing.
+  const skipProbe = !force && (held === target.key || wouldDowngrade(held, target.key));
+  const chosen = skipProbe ? target : await servedTarget(builds, now);
+  if (chosen.key !== target.key) {
+    console.log(`served    ${chosen.key}  (${target.key} is listed but not served)`);
+  }
+  use(chosen, { now, held });
+}
+
+/** The newest candidate before the cutoff that still answers a Range request. */
+async function servedTarget(builds, now) {
+  for (const candidate of candidates(builds, now)) {
+    if (await isServed(archiveUrl(candidate.key))) return candidate;
+  }
+  fail("no Protomaps build before the settle cutoff is still served");
+}
+
+/** Write archive.json for the target, or report why nothing changes. */
+function use(target, { now, held }) {
+  const ageHours = (now.getTime() - new Date(target.uploaded).getTime()) / 3600000;
 
   if (ageHours < MIN_AGE_HOURS) {
     // The anchor should make this impossible. If it ever fires, refusing is far

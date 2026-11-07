@@ -1,7 +1,7 @@
 # PMTiles on Cloudflare Static Assets
 
-Serves the 118 GiB Protomaps basemap as a PMTiles archive on Cloudflare, without
-R2 and without a Worker. The archive is cut into part files held as Static
+Serves the Protomaps basemap, 138.88 GB as of November 2026, as a PMTiles archive
+on Cloudflare, without R2 and without a Worker. The archive is cut into part files held as Static
 Assets. A Cloudflare Snippet answers HTTP range requests by reading those parts.
 
 Read [pmtiles-shard-spec.md](pmtiles-shard-spec.md) for the design and the
@@ -21,10 +21,10 @@ design:
 | Snippet CPU | 5 ms |
 | Snippet memory | 2 MB |
 
-The chosen layout is 65,259 files: 16 KiB for the header, 2,000,000 B parts for
-the tile section, 1,160 B for the metadata, and 160,000 B parts for the leaf
-directories. That leaves 34,741 files of headroom and every client request needs
-at most 2 subrequests.
+The chosen layout is 16 KiB for the header, 1,000,000 B parts for the tile
+section, 1,179 B for the metadata, and parts for the leaf directories. Those
+files are split across 25 shards, so each Worker stays far under the 100,000
+file limit, and every client request needs at most 2 subrequests.
 
 ## Cost
 
@@ -54,10 +54,13 @@ So a tile request costs USD 0. A Worker would be billed per request.
 | `tools/bench-assets.mjs` | Measures this host against jsDelivr and the upstream assets site. |
 | `asset-hosting.md` | Where the fonts, sprites and libraries are served from, and why. |
 | `web/index.html` | The documentation page: the map, the builder, and the OpenStreetMap-to-Leaflet migration guide. |
-| `shard-repo/` | The template pushed to each of the 13 shard repos. |
+| `shard-repo/` | The template pushed to each of the 25 shard repos. |
 | `make-repos.mjs` | Creates the shard repos and pushes the template. |
 | `wire-shards.mjs` | Binds each shard repo to its Worker through the API. |
-| `refresh.md` | The monthly data refresh: the window, and how it runs. || `pmtiles-shard-spec.md` | Full specification and measurements. |
+| `refresh.md` | The monthly data refresh: the window, the settle gap, and how it runs. |
+| `sharding.md` | How the archive is split across the shards, and the arithmetic. |
+| `pmtiles-shard-spec.md` | Full specification and measurements. |
+| `TODO.md` | Page changes waiting for the next translation pass. |
 
 ## Use
 

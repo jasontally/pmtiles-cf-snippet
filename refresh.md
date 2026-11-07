@@ -152,7 +152,7 @@ another, and the reader could not tell which is which.
 The answer is anchored to a fixed point instead:
 
 > the newest Protomaps build published before 00:30 UTC on the first Sunday of
-> the current month
+> the current month, less 14 days
 
 Every repo computes the same anchor, so every repo computes the same target,
 whatever minute of the window it fires at. A build that appears after the first
@@ -160,11 +160,71 @@ Sunday is ignored until the following month. There is no state file, no
 coordination, and no ordering to get wrong. `shard-repo/refresh.test.mjs` checks
 this directly by running the rule at all 25 slot times and asserting one answer.
 
+The 14 days is the settle gap. It is measured back from the anchor and never from
+the clock, so a shard that retries on the fourth Sunday computes the same cutoff
+as the shards that ran on the first Sunday. See "Why a build must settle" below.
+
 There is a second rule underneath it: a build must be at least 4 hours old before
 we cut parts from it. Protomaps lists a build before it has finished writing it,
 and a short read gives parts that are the right length and the wrong bytes, which
-no size check catches. The anchor already keeps a build days old, so this is a
-second line of defence, and the script refuses rather than proceeding if it fails.
+no size check catches. The anchor and the settle gap already keep a build weeks
+old, so this is a second line of defence, and the script refuses rather than
+proceeding if it fails.
+
+A third rule sits on the commit itself. `refresh.mjs` sends a one byte ranged GET
+to the chosen key before it writes `archive.json`. A key that no longer answers
+206 is skipped and the next older key before the cutoff is tried. This exists
+because `builds.json` can list a build that storage no longer serves. The probe is
+a ranged GET and not a HEAD: on 7 November 2026 a HEAD answered 200 for a file
+that answered 404 to the ranged GET the build itself makes.
+
+### Why a build must settle: what the removal data says
+
+Protomaps removes builds. On 7 November 2026 the build all 25 shards took on
+1 November, `20261031.pmtiles`, returned 404. It had been listed for six days, and
+all 25 verify workflows failed three times that week.
+
+The removal history was measured from 25 Wayback Machine snapshots of
+`builds.json` between 23 October 2023 and 19 August 2026, cross checked against
+storage on 7 November 2026 with a ranged GET:
+
+| Measure | Value |
+|---|---|
+| Keys removed between two snapshots | 192 |
+| Removals bracketed by snapshots 10 days apart or less | 30 |
+| Life of those 30, upload to the second snapshot | 7 to 14 days, median 9 |
+| Removed within 10 days of upload | 23 |
+| Removed within 14 days of upload | 30 |
+
+Removals come in bursts. A run of daily builds is listed, then all of it vanishes
+at the next snapshot: 31 October to 2 November 2023 gone by 19 November, 7 to 13
+September 2024 gone by 10 November, 3 to 12 November 2025 gone by 3 April 2026.
+The same pattern removed `20261025` to `20261031` by 7 November 2026.
+
+One build per month has survived in every month from September 2023 to today.
+The builds that get pulled are the daily extras, and they last one to two weeks.
+
+So the target must have been listed for longer than that before we take it. 14
+days is the longest life seen in the tight brackets, so it clears every recorded
+removal. A 7 day gap would not have helped on 1 November: it would have taken
+`20261025`, which was removed as well. With 14 days the 1 November target becomes
+`20260811`, the previous monthly survivor.
+
+The cost is that map data is older when it is deployed: 14 to 20 days rather than
+0 to 6. That is the price of not shipping a build that Protomaps pulls.
+
+### When the source archive is gone
+
+`verify-shard.mjs` reads the header of the archive in `archive.json`. When that
+archive answers 404 or 410, the check reports that the source is no longer hosted,
+leaves `archive.json` alone, counts no attempt, and exits 0.
+
+A removed source does not make a shard wrong. The shard holds its own copy of the
+bytes and keeps serving them. A rebuild would fetch the same dead URL and fail, so
+starting one costs build minutes for nothing, and failing the workflow sends 75
+failure notices a week for a condition that cannot recover on its own.
+
+A 5xx or a network fault still fails the check, because that is worth looking at.
 
 ### Most Sundays nothing happens
 

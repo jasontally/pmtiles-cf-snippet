@@ -19,6 +19,16 @@
  * To push an updated template to repos that already exist:
  *   node make-repos.mjs --update
  *
+ * A GitHub push is the only way a shard repo changes. It is also what starts the
+ * Cloudflare build, because Workers Builds watches the repo, so nothing here
+ * deploys to Cloudflare and nothing here calls the Cloudflare API.
+ *
+ * An existing repo is cloned, its own history is pulled, the template is copied
+ * over it, and the result is pushed as a normal commit. The push is never forced:
+ * a force push would throw away whatever GitHub changed since the last update.
+ *
+ *   node make-repos.mjs --update --only 0    # one shard, for a test
+ *
  * Needs the GitHub CLI, authenticated, with permission to create repositories.
  */
 
@@ -42,6 +52,13 @@ function arg(name, fallback) {
 }
 const dryRun = process.argv.includes("--dry-run");
 const updateOnly = process.argv.includes("--update");
+// A comma separated list of shard indexes, for a test run on one or two repos.
+const only = arg("only", null);
+const onlySet = only === null ? null : new Set(only.split(",").map((s) => Number(s.trim())));
+if (onlySet && [...onlySet].some((i) => !Number.isInteger(i) || i < 0 || i >= SHARD_COUNT)) {
+  console.error(`--only takes shard indexes from 0 to ${SHARD_COUNT - 1}, got ${only}`);
+  process.exit(1);
+}
 
 function workerName(index) {
   return `${WORKER_PREFIX}-${String(index).padStart(2, "0")}`;
@@ -63,9 +80,26 @@ function gh(args, options = {}) {
   return (result.stdout || "").trim();
 }
 
+/**
+ * Stop the run. When the file is run it exits; when a test imports it, it throws
+ * so the test can assert on the message instead of losing the process.
+ */
 function fail(message) {
-  console.error(`\nmake-repos failed: ${message}`);
-  process.exit(1);
+  const text = `make-repos failed: ${message}`;
+  if (process.argv[1] && process.argv[1].endsWith("make-repos.mjs")) {
+    console.error(`\n${text}`);
+    process.exit(1);
+  }
+  throw new Error(text);
+}
+
+/** The file's text, or null when it is not there. */
+function readIfPresent(file) {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 /** Confirm the template is present and the tests pass, so no repo gets broken code. */
@@ -86,12 +120,25 @@ function preflight() {
   console.log(`shard build tests: ${(test.stdout || "").trim()}`);
 }
 
-/** Copy the template into a fresh directory with the Worker name filled in. */
-function stage(index, archiveJson = null) {
-  const dir = mkdtempSync(join(tmpdir(), `shard-${index}-`));
+/**
+ * Copy the template into a directory, with the per shard values filled in.
+ *
+ * The directory is the clone of the shard repo when one exists, so the template
+ * lands on top of the repo's own files and its own history. A new repo gets a
+ * fresh directory.
+ */
+export function stage(index, dir = null) {
+  // Read the shard's own archive.json before the template lands on top of it.
+  // The clone is a copy, so the copy is the only record of what the shard holds.
+  const updating = dir !== null;
+  const ownArchive = updating ? readIfPresent(join(dir, "archive.json")) : null;
+  dir = dir ?? mkdtempSync(join(tmpdir(), `shard-${index}-`));
   cpSync(TEMPLATE, dir, { recursive: true });
   // The template is copied whole, then the per shard workflow is written over it.
   rmSync(join(dir, ".github"), { recursive: true, force: true });
+  // This test belongs to the template push, which runs in this repo. In a shard
+  // repo there is no make-repos.mjs to test.
+  rmSync(join(dir, "make-repos.test.mjs"), { force: true });
   // render-workflow.mjs exists to generate the workflow above, in this repo. In a
   // shard repo it would be dead code that looks like it does something.
   rmSync(join(dir, "render-workflow.mjs"), { force: true });
@@ -100,10 +147,19 @@ function stage(index, archiveJson = null) {
   writeFileSync(config, readFileSync(config, "utf8").replace("SHARD_WORKER_NAME", worker));
 
   // The archive a shard holds is the shard's own state, and the refresh workflow
-  // owns it. The template holds the seed, so pushing the template over a
-  // refreshed shard puts it back to the seed archive, and the build then serves
-  // the old data. An existing repo keeps its own archive.json.
-  if (archiveJson) writeFileSync(join(dir, "archive.json"), archiveJson);
+  // owns it. The template holds a seed key from 2024, so copying the template
+  // over a refreshed shard would put the seed back, and the build would then
+  // serve two year old data. The shard's own file is put back as it was.
+  //
+  // A missing shard archive.json is an error, not a reason to delete the file.
+  // On 7 November 2026 an earlier version of this function deleted it, and the
+  // shard lost the record of the build it holds. A shard repo always has the
+  // file, so its absence here means something is wrong.
+  if (updating && ownArchive === null) {
+    fail(`${dir} has no archive.json, so the shard would lose the build it holds`);
+  }
+  // A new repo keeps the template's seed, because it has nothing of its own yet.
+  if (updating) writeFileSync(join(dir, "archive.json"), ownArchive);
 
   const pkg = join(dir, "package.json");
   writeFileSync(
@@ -140,25 +196,6 @@ function stage(index, archiveJson = null) {
  * the 20261010 archive and 5,544 for 20261017.
  */
 const PARTS_PER_SHARD = 5544;
-
-/**
- * The archive.json a repo holds, or null if it has none.
- *
- * It is the shard's own state, and the refresh workflow owns it. A template
- * push must not put the seed back.
- */
-function currentArchiveJson(owner, repo) {
-  const result = spawnSync("gh", ["api", `repos/${owner}/${repo}/contents/archive.json`], {
-    encoding: "utf8",
-  });
-  if (result.status !== 0) return null;
-  try {
-    const doc = JSON.parse(result.stdout);
-    return Buffer.from(doc.content, "base64").toString("utf8");
-  } catch {
-    return null;
-  }
-}
 
 function readmeFor(index, worker) {
   const first = index * PARTS_PER_SHARD;
@@ -239,69 +276,113 @@ function main() {
 
   let created = 0;
   let updated = 0;
+  let unchanged = 0;
   const failed = [];
 
   for (let i = 0; i < SHARD_COUNT; i++) {
+    if (onlySet && !onlySet.has(i)) continue;
     const repo = repoName(i);
     const exists = spawnSync("gh", ["repo", "view", `${owner}/${repo}`], {
       encoding: "utf8",
     }).status === 0;
-    const dir = stage(i, exists ? currentArchiveJson(owner, repo) : null);
 
+    if (exists && !updateOnly) {
+      console.log(`exists   ${repo}, updating it`);
+    }
+
+    const work = mkdtempSync(join(tmpdir(), `shard-${i}-`));
+    let dir = null;
     try {
-      // A repo that already exists is updated, so re-running is safe and picks
-      // up template fixes.
-      // Created from the staged directory, and without --source or --remote.
-      // --source=. would use this repo's directory, and --remote=origin would
-      // collide with the remote that already exists here.
-      if (!exists) {
+      const git = (args, options = {}) => {
+        const r = spawnSync("git", args, { cwd: dir ?? work, encoding: "utf8", ...options });
+        if (r.status !== 0) fail(`git ${args.join(" ")}:\n${r.stderr || r.stdout}`);
+        return (r.stdout || "").trim();
+      };
+      const push = () => git(["push", "-q", "origin", "main"]);
+
+      if (exists) {
+        // Start from what GitHub holds, not from the template. Anything that
+        // changed there since the last update, such as a refresh commit or a
+        // workflow edit, is in the clone and stays.
+        gh(["repo", "clone", `${owner}/${repo}`, work, "--", "--quiet"]);
+        dir = work;
+        const before = git(["rev-parse", "HEAD"]);
+        console.log(`pulled   ${repo} at ${before.slice(0, 10)}`);
+        stage(i, dir);
+        git(["add", "-A"]);
+        // `git status` prints nothing when the tree is clean. Do not test the
+        // return of `git pull` here: a quiet pull prints nothing either, and an
+        // earlier version read that as "no change" after it had already pushed.
+        if (git(["status", "--porcelain"]) === "") {
+          unchanged++;
+          console.log(`same     ${repo}, the template matches it, so nothing is pushed`);
+          continue;
+        }
+        git(["-c", "user.name=Jason Tally",
+          "-c", "user.email=719178+jasontally@users.noreply.github.com",
+          "commit", "-q", "-F", "-"], {
+          input: `Update the shard template.\n\n${templateChangeSummary()}\n\nSee sharding.md in jasontally/pmtiles-cf-snippet.\n`,
+        });
+        // A refresh or a workflow edit can land between the clone and the push.
+        // Fetch and rebase onto it rather than overwrite it.
+        git(["pull", "-q", "--rebase", "origin", "main"]);
+        push();
+        updated++;
+        console.log(`pushed   ${repo} ${git(["rev-parse", "--short", "HEAD"])}`);
+      } else {
+        // A new repo has no history, so the template is its first commit.
+        // Created from the staged directory, and without --source or --remote.
+        // --source=. would use this repo's directory, and --remote=origin would
+        // collide with the remote that already exists here.
+        stage(i, work);
+        dir = work;
         gh(["repo", "create", repo, "--public", "--description",
           `Shard ${i} of the Protomaps basemap PMTiles archive, served from Cloudflare Static Assets`],
           { cwd: dir });
         created++;
         console.log(`created  ${repo}`);
-      } else if (!updateOnly) {
-        console.log(`exists   ${repo}, updating the template anyway`);
+        git(["init", "-q", "-b", "main"]);
+        git(["add", "-A"]);
+        git(["-c", "user.name=Jason Tally",
+          "-c", "user.email=719178+jasontally@users.noreply.github.com",
+          "commit", "-q", "-F", "-"], {
+          input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * PARTS_PER_SHARD} to ${(i + 1) * PARTS_PER_SHARD - 1}.\n${
+            i === 0
+              ? "\nAlso holds head.bin, meta.bin, and the leaf directories, which\ntogether are 324.9 MB.\n"
+              : ""
+          }The build downloads only this shard's bytes with an HTTP Range request\nand writes them to public/, then wrangler uploads them. Wrangler skips any\npart whose content hash Cloudflare already holds.\n\nSee sharding.md in jasontally/pmtiles-cf-snippet.\n`,
+        });
+        git(["remote", "add", "origin", `https://github.com/${owner}/${repo}.git`]);
+        push();
+        console.log(`pushed   ${repo}`);
       }
-
-      // Push the staged template over whatever is there.
-      // options carries `input`, which spawnSync needs for a commit message on
-      // stdin. Dropping it makes the commit fail with an empty message.
-      const git = (args, options = {}) => {
-        const r = spawnSync("git", args, { cwd: dir, encoding: "utf8", ...options });
-        if (r.status !== 0) fail(`git ${args.join(" ")}:\n${r.stderr || r.stdout}`);
-      };
-      git(["init", "-q", "-b", "main"]);
-      git(["add", "-A"]);
-      git(["-c", "user.name=Jason Tally",
-        "-c", "user.email=719178+jasontally@users.noreply.github.com",
-        "commit", "-q", "-F", "-"], {
-        input: `Shard ${i} of the Protomaps basemap archive.\n\nHolds tile parts ${i * PARTS_PER_SHARD} to ${(i + 1) * PARTS_PER_SHARD - 1}.\n${
-          i === 0
-            ? "\nAlso holds head.bin, meta.bin, and the leaf directories, which\ntogether are 324.9 MB.\n"
-            : ""
-        }The build downloads only this shard's bytes with an HTTP Range request\nand writes them to public/, then wrangler uploads them. Wrangler skips any\npart whose content hash Cloudflare already holds.\n\nSee sharding.md in jasontally/pmtiles-cf-snippet.\n`,
-      });
-      git(["remote", "add", "origin", `https://github.com/${owner}/${repo}.git`]);
-      git(["push", "-q", "--force", "origin", "main"]);
-      if (exists) updated++;
-      console.log(`pushed   ${repo}`);
     } catch (error) {
       failed.push(`${repo}: ${error.message}`);
       console.error(`FAILED   ${repo}: ${error.message}`);
     } finally {
-      rmSync(dir, { recursive: true, force: true });
+      rmSync(work, { recursive: true, force: true });
     }
   }
 
-  console.log(`\ncreated ${created}, updated ${updated}, failed ${failed.length}`);
+  console.log(`\ncreated ${created}, updated ${updated}, unchanged ${unchanged}, failed ${failed.length}`);
   if (failed.length) {
     console.log("\nfailures:");
     for (const message of failed) console.log(`  ${message}`);
     process.exit(1);
   }
-  console.log(`\nNext: node wire-shards.mjs  to bind each ${repoName(0)}..${repoName(12)}`);
-  console.log("to its Worker and set ARCHIVE_URL, SHARD_INDEX, and SHARD_COUNT.");
 }
 
-main();
+/**
+ * The subject of a template update commit.
+ *
+ * The shard repos hold no other description of what the template push changed,
+ * and the commit is the only record. It names the files the template owns, so a
+ * reader of a shard repo can tell a template push from a refresh commit.
+ */
+function templateChangeSummary() {
+  return "Replaces build.mjs, refresh.mjs, verify-shard.mjs, wrangler.jsonc,\n" +
+    "package.json, the tests, the README, and both workflows with the current\n" +
+    "shard-repo template. archive.json is not touched: the refresh workflow owns it.";
+}
+
+if (process.argv[1] && process.argv[1].endsWith("make-repos.mjs")) main();

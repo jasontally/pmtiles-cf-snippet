@@ -29,6 +29,18 @@
  * a shard that cannot be built is left alone after a few tries, and the check
  * says so.
  *
+ * WHEN THE SOURCE ARCHIVE IS GONE
+ *
+ * Protomaps removes builds. On 2026-11-07 the archive every shard held,
+ * 20261031.pmtiles, returned 404, and this check threw before it could say
+ * anything useful. All 25 shards failed three times that week.
+ *
+ * A shard holds its own copy of the bytes, so a removed source archive does not
+ * make the shard wrong. The check cannot compare against a source that is gone,
+ * so it says so, leaves archive.json alone, and exits 0. It must not count an
+ * attempt and must not start a build: a build would fetch the same dead URL and
+ * fail, and that costs Cloudflare build minutes for nothing.
+ *
  * It holds no credentials and needs none. The archive header is read over
  * plain HTTP, and the shard is read over plain HTTP.
  */
@@ -62,13 +74,44 @@ export function partOffset(header, part, tileShard = TILE_SHARD) {
   return header.tileDataOffset + part * tileShard;
 }
 
-/** Read the archive header over a ranged request. */
+/**
+ * Read the archive header over a ranged request.
+ *
+ * Returns { header } when the archive answers, or { gone, status } when the
+ * archive is no longer hosted. A removed archive is a fact about Protomaps, not
+ * a failed check, so it is a return value and not an exception. Any other
+ * status still throws, because a 500 or a network fault is worth failing on.
+ */
 export async function readHeader(url, fetchImpl = fetch) {
   const response = await fetchImpl(url, { headers: { Range: "bytes=0-16383" } });
+  if (response.status === 404 || response.status === 410) {
+    return { gone: true, status: response.status };
+  }
   if (response.status !== 206) {
     throw new Error(`${url} returned ${response.status} for a Range request`);
   }
-  return parseHeader(new Uint8Array(await response.arrayBuffer()));
+  return { header: parseHeader(new Uint8Array(await response.arrayBuffer())) };
+}
+
+/**
+ * What the check should do, given the archive header and the shard result.
+ *
+ * Kept apart from main so the decision can be tested without a network.
+ */
+export function decide({ archive, headerResult, shardResult }) {
+  if (headerResult.gone) {
+    return {
+      exitCode: 0,
+      message:
+        `${archive.url} returned ${headerResult.status}: the source archive is no longer ` +
+        `hosted, so this shard cannot be compared against it. archive.json is left ` +
+        `alone and no build starts. The shard keeps the bytes it holds.`,
+    };
+  }
+  if (shardResult.ok) {
+    return { exitCode: 0, message: `part ${shardResult.part} is right` };
+  }
+  return { exitCode: 0, stale: true, reason: shardResult.reason };
 }
 
 /**
@@ -124,15 +167,19 @@ async function main() {
   }
 
   const archive = readArchive();
-  const header = await readHeader(archive.url);
-  const result = await checkShard({ shardIndex, header, archiveUrl: archive.url });
+  const headerResult = await readHeader(archive.url);
+  const shardResult = headerResult.gone
+    ? { ok: false, reason: "the source archive is gone" }
+    : await checkShard({ shardIndex, header: headerResult.header, archiveUrl: archive.url });
 
-  if (result.ok) {
-    console.log(`shard ${shardIndex} holds ${archive.key}. Part ${result.part} is right.`);
+  const outcome = decide({ archive, headerResult, shardResult });
+
+  if (outcome.message) {
+    console.log(`shard ${shardIndex}: ${outcome.message}`);
     return;
   }
 
-  console.log(`shard ${shardIndex} does not hold ${archive.key}: ${result.reason}`);
+  console.log(`shard ${shardIndex} does not hold ${archive.key}: ${outcome.reason}`);
 
   if (archive.attempts >= MAX_ATTEMPTS) {
     console.log(
