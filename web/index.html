@@ -529,108 +529,6 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
     </table>
   </div>
 
-    <h3>Writing a layer yourself, and colouring it</h3>
-    <p>
-      A layer is a filter, a zoom, a shape and a colour. Two things in the filter get
-      everybody, and both fail without an error:
-    </p>
-    <ul>
-      <li>
-        <strong><code>kind</code> is the coarse name.</strong> For roads it is one of
-        <code>highway</code>, <code>major_road</code>, <code>minor_road</code>,
-        <code>path</code>, <code>rail</code>. The names in the upstream documentation
-        — <code>motorway</code>, <code>primary</code>, <code>residential</code> — are
-        <code>kind_detail</code> values, and a layer that filters <code>kind</code>
-        against them draws nothing and says so nowhere.
-      </li>
-      <li>
-        <strong>A layer is not drawn below its own <code>minzoom</code>.</strong> The
-        archive stops at z15, so a layer whose minzoom is 16 is never drawn at all.
-        Most features also carry their own <code>min_zoom</code>, the zoom at which
-        the data says they are worth showing, and the shipped styles test that too.
-      </li>
-    </ul>
-    <p>So a road, its name, and a toggle to switch the line off:</p>
-<pre><code>{
-  <span class="s">"id"</span>: <span class="s">"road-major"</span>,
-  <span class="s">"type"</span>: <span class="s">"line"</span>,
-  <span class="s">"source"</span>: <span class="s">"protomaps"</span>,
-  <span class="s">"source-layer"</span>: <span class="s">"roads"</span>,            <span class="c">// one of the nine</span>
-  <span class="s">"minzoom"</span>: 4,                                  <span class="c">// not drawn below this</span>
-  <span class="s">"filter"</span>: [<span class="s">"=="</span>, [<span class="s">"get"</span>, <span class="s">"kind"</span>], <span class="s">"major_road"</span>],
-  <span class="s">"layout"</span>: {
-    <span class="s">"line-cap"</span>: <span class="s">"round"</span>,
-    <span class="s">"visibility"</span>: <span class="s">"visible"</span>          <span class="c">// "none" to hide it</span>
-  },
-  <span class="s">"paint"</span>: {
-    <span class="s">"line-color"</span>: <span class="s">"#f7c44d"</span>,          <span class="c">// any CSS colour</span>
-    <span class="s">"line-width"</span>: [<span class="s">"interpolate"</span>, [<span class="s">"linear"</span>], [<span class="s">"zoom"</span>], 4, 1.7, 12, 6]
-  }
-}</code></pre>
-    <p>
-      A name is a symbol layer reading the <code>name</code> field, with a halo or
-      nothing behind it. A missing glyph is silent, so the stack you ask for must be
-      one of the two on this host:
-    </p>
-<pre><code>{
-  <span class="s">"id"</span>: <span class="s">"road-label-major"</span>,
-  <span class="s">"type"</span>: <span class="s">"symbol"</span>,
-  <span class="s">"source"</span>: <span class="s">"protomaps"</span>,
-  <span class="s">"source-layer"</span>: <span class="s">"roads"</span>,
-  <span class="s">"minzoom"</span>: 11,
-  <span class="s">"layout"</span>: {
-    <span class="s">"text-field"</span>: [<span class="s">"coalesce"</span>, [<span class="s">"get"</span>, <span class="s">"name:en"</span>], [<span class="s">"get"</span>, <span class="s">"name"</span>]],
-    <span class="s">"text-font"</span>: [<span class="s">"Noto Sans Medium"</span>],  <span class="c">// or Noto Sans Regular</span>
-    <span class="s">"text-size"</span>: 10,
-    <span class="s">"symbol-placement"</span>: <span class="s">"line"</span>       <span class="c">// follow the road</span>
-  },
-  <span class="s">"paint"</span>: {
-    <span class="s">"text-color"</span>: <span class="s">"#2b2a26"</span>,
-    <span class="s">"text-halo-color"</span>: <span class="s">"#ffffff"</span>,
-    <span class="s">"text-halo-width"</span>: 1.1
-  }
-}</code></pre>
-    <p class="note">
-      A layer that draws nothing is not an error, and MapLibre will not say which
-      check failed. If yours is blank, check in this order: the field name, the
-      layer's minzoom, the font stack, then the icon name against the sheet's own
-      <code>light.json</code>.
-    </p>
-  <p>
-    If you have a style that points its glyphs at <code>demotiles.maplibre.org</code>,
-    replacing that hostname is the whole change. The path is deliberately the same.
-  </p>
-<pre><code><span class="s">"glyphs"</span>: <span class="s">"https://tiles.jasontally.com/font/{fontstack}/{range}.pbf"</span>,
-<span class="s">"sprite"</span>: <span class="s">"https://tiles.jasontally.com/sprites/v4/light"</span>
-
-<span class="c">// before, in a style you already have</span>
-<span class="d">- "glyphs": "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",</span>
-<span class="a">+ "glyphs": "https://tiles.jasontally.com/font/{fontstack}/{range}.pbf",</span></code></pre>
-  <p>
-    If a style asks for a font stack that is not one of the two above, nothing will
-    be drawn for it. Protomaps' own styles use <code>Noto Sans Medium</code> for
-    bold text; there is no <code>Noto Sans Bold</code> in this set, which is why a
-    style that asks for one silently loses every label.
-  </p>
-  <p class="note">
-    <strong>Which host is faster, and what was decided about it.</strong> Measured
-    rather than assumed: interleaved requests, one at a time, on one connection, first
-    three samples dropped, time to first byte separated from the transfer. On that
-    test a CDN answered 10 to 45 ms sooner for every one of these files, which is the
-    whole 15% rule and a margin the samples clearly clear. The libraries load from
-    jsDelivr for that reason.
-  </p>
-  <p class="note">
-    The fonts and the sprites are served from here even though the same measurement
-    says a CDN would answer them about 10 ms sooner. That is a decision, not a
-    measurement. A map that comes from one hostname does not break when somebody
-    else's does, and a glyph server that is down is a map with no labels. If you
-    would rather have the 10 ms, point <code>glyphs</code> at
-    <code>protomaps.github.io/basemaps-assets/fonts</code> and it works with the same
-    path. One reader's numbers from one city, and re-running the comparison is one
-    command.
-  </p>
-
   <h3>Five. About Leaflet</h3>
   <p>
     Leaflet's <code>L.tileLayer</code> draws pictures; these are vector tiles. A
@@ -659,10 +557,6 @@ console.log(tile.data.byteLength);</code></pre>
     <code>PMTiles</code> is the reader that sits on top of it and understands the
     format. <code>FileSource</code> is the local-file equivalent of
     <code>FetchSource</code>; given a URL string it will not work.
-  </p>
-  <p class="note">
-    The archive is a snapshot, not a live feed.
-    <a href="#freshness">How fresh is this?</a> has the timing.
   </p>
 </section>
 
@@ -863,83 +757,6 @@ console.log(tile.data.byteLength);</code></pre>
       <tbody id="style-rows"></tbody>
     </table>
   </div>
-</section>
-
-<section id="schema">
-  <h2>What is in the tiles</h2>
-  <p class="sub">Read from the archive's own metadata at page load. These are the layer names a style must use.</p>
-  <div class="scroll">
-    <table>
-      <thead><tr><th class="mono">Source layer</th><th>Zoom</th><th>Fields</th></tr></thead>
-      <tbody id="schema-rows"><tr><td colspan="3">loading…</td></tr></tbody>
-    </table>
-  </div>
-</section>
-
-<section id="limits">
-  <h2>What this is not</h2>
-  <p class="sub">Plain answers, so nothing here surprises you later.</p>
-
-  <ul>
-    <li>
-      <strong>There is no service level guarantee.</strong> This is a free service
-      with no contract behind it. It can be slow, it can go down, and the URL and
-      the data can change or disappear without notice. If your product depends on
-      it, host your own copy of the tiles or buy a supported plan from someone.
-    </li>
-    <li>
-      <strong>It is never current to the hour.</strong> The copy is a snapshot of the
-      newest Protomaps release, not a live feed. Edits made today are not in it.
-      <a href="#freshness">How fresh is this?</a> has the timing.
-    </li>
-    <li>
-      <strong>No whole-file download.</strong> Requests are answered in ranges of at
-      most 512&nbsp;KiB, which is all a PMTiles client ever asks for. Asking for the
-      whole archive in one request returns <code>416</code>, which is correct.
-    </li>
-    <li>
-      <strong>Attribution is required.</strong> The tiles are derived from
-      OpenStreetMap. Keep the attribution line in your style or on your map.
-    </li>
-  </ul>
-</section>
-
-<section id="freshness">
-  <h2>How fresh is this?</h2>
-  <p class="sub">The tiles are a copy of the Protomaps Basemap, rebuilt once a month.</p>
-
-  <ul>
-    <li>
-      <strong>Rebuilt once a month.</strong> The build runs on the first Sunday of
-      the month, between 00:30 and 07:00 UTC, the only window in which upstream has
-      not published in three years of release history. Monthly and not weekly,
-      because a new archive invalidates the cached parts on the CDN and in every
-      browser that already has them, and each rebuild costs build time.
-    </li>
-    <li>
-      <strong>Nothing to do most months.</strong> A rebuild only happens when upstream
-      has published a new release.
-    </li>
-    <li>
-      <strong>Which upstream build is in use right now?</strong> Use the
-      <strong>Archive metadata</strong> button at the top of this page. It reads
-      the archive's own header, so the answer is always current rather than
-      something this page could have gone stale about.
-    </li>
-    <li>
-      <strong>A rebuild is not instantaneous.</strong> It is thirteen separate
-      rebuilds spread over about six and a half hours, one at a time. For most of
-      that window the copy is a mix of two upstream builds. A tile you request
-      during it may come from the newer build rather than the one the reader
-      advertised, which shows as a tile from the wrong place, not as a broken
-      map.
-    </li>
-    <li>
-      <strong>A rebuild can be missed.</strong> It is a best-effort job, not a
-      guarantee. If one step fails, the rest of the copy stays on the previous
-      upstream build. It is still a working map.
-    </li>
-  </ul>
 </section>
 
 <footer>
@@ -1172,7 +989,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
       }
     });
 
-    loadSchema();
     await loadBuilder();
   }
 
@@ -1548,30 +1364,6 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
     apply();
     say("reset to " + builder.baseId);
   });
-
-  // Read the archive's metadata and list its layers on the page.
-  async function loadSchema() {
-    try {
-      // FetchSource reads bytes over HTTP, PMTiles understands the format.
-      archive = archive || new pmtiles.PMTiles(new pmtiles.FetchSource(TILES));
-      const meta = await archive.getMetadata();
-      const layers = (meta.vector_layers || []).slice()
-        .sort((a, b) => a.id.localeCompare(b.id));
-      $("schema-rows").innerHTML = layers.map((l) =>
-        '<tr><td class="mono">' + l.id + "</td>" +
-        "<td>z" + l.minzoom + "–z" + l.maxzoom + "</td>" +
-        '<td class="mono">' + Object.keys(l.fields || {}).length +
-        ' &nbsp;<span style="color:var(--muted)">' +
-        Object.keys(l.fields || {}).slice(0, 8).join(", ") +
-        (Object.keys(l.fields || {}).length > 8 ? ", …" : "") +
-        "</span></td></tr>"
-      ).join("");
-    } catch (error) {
-      $("schema-rows").innerHTML =
-        '<tr><td colspan="3">could not read the archive metadata: ' +
-        String(error.message || error) + "</td></tr>";
-    }
-  }
 
   // ---- the JSON viewer ----
   //

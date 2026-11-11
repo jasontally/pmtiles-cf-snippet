@@ -328,23 +328,12 @@ await check("the page links the tiles URL the styles use", () => {
   for (const leak of ["snippet", "Snippet", "Static Assets", "wrangler", "Wrangler", "shard", "part file"]) {
     assert.ok(!page.includes(leak), `the page mentions ${leak}`);
   }
-  // The rebuild section has to say when, and must not promise an instant swap.
-  // "Rebuilt", not "refreshed": a monthly rebuild from a new upstream release is
-  // not the same claim as data that keeps itself up to date. Monthly is the
-  // published cadence, chosen to limit cache churn and build cost.
-  assert.ok(page.includes("Rebuilt once a month"), "the page does not say when it rebuilds");
-  assert.ok(/00:30 and\s+07:00 UTC/.test(page), "the page does not give the rebuild window");
-  assert.ok(
-    page.includes("Archive metadata"),
-    "the page should point at the archive's own metadata rather than a hard coded date"
-  );
   // It must not claim the data itself never goes stale. Scoped to a claim about the
   // tiles, because a comment saying a layer "never changes" is not that claim.
   assert.ok(
     !/(tiles|data|archive)[^.<]{0,40}never (changes|out of date|stale)/i.test(page),
     "the page promises data that never goes stale"
   );
-  assert.ok(/month/i.test(page), "the page does not give a staleness scale");
 });
 
 await check("the page opens on the style the build names as the default", () => {
@@ -591,18 +580,9 @@ await check("the libraries are pinned to a version with an integrity hash", asyn
 await check("the page documents the fonts and the sprites it serves", () => {
   const page = readFileSync(join(HERE, "index.html"), "utf8");
   assert.ok(page.includes("Fonts and sprites"), "the page has no section on fonts and sprites");
-  // The claim is a hostname swap, so the demo host has to be named and shown as
-  // the before. If that section goes, the claim it makes is gone with it.
-  assert.ok(page.includes("demotiles.maplibre.org"), "the swap-from host is not named");
-  assert.ok(page.includes("replacing that hostname is the whole change"), "the swap is not explained");
-  assert.ok(page.includes("Noto Sans Bold"), "the missing bold stack is not called out");
   assert.ok(page.includes("256 codepoints at a time"), "the page does not explain the 256 ranges");
   assert.ok(page.includes("local name"), "the page does not say why non-Latin ranges matter");
-  // The page states which host serves what, and why. If that goes stale the page
-  // makes a claim nobody measured, which is the one thing not to do here.
   assert.ok(page.includes("Fonts, sprites and the libraries"), "the section is not titled for all three");
-  assert.ok(/decide[sd]?\b|decision, not a/.test(page), "the page does not separate the decision from the measurement");
-  assert.ok(page.includes("protomaps.github.io"), "the page does not offer the upstream alternative");
 });
 
 await check("a published style carries no placeholder", () => {
@@ -944,45 +924,17 @@ await check("the sources the styles name, the glyphs and the sheets all exist", 
   }
 });
 
-await check("the examples cover the layers, the colours, and where the copy goes", () => {
-  // These are the things a reader has to be told, learned the hard way here: a
-  // filter on the wrong field draws nothing and says nothing, and a layer above the
-  // archive's top zoom never draws. Also that the builder's copy is a file they put
-  // somewhere, which the docs used to leave out entirely. Nothing in this is new
-  // prose for its own sake.
+await check("the examples cover where the copy goes", () => {
+  // The builder's copy is a style file the reader puts somewhere. The docs used
+  // to leave that out entirely, so the two ways to use the copy are checked here.
   const page = readFileSync(join(HERE, "index.html"), "utf8");
 
-  // Where the copy goes, both ways.
   assert.ok(page.includes("Where to put the style you made"), "there is no section on using a copied style");
   assert.ok(/style: <span[^>]*>"my-basemap\.json"/.test(page), "no example of a saved file");
   assert.ok(/const myStyle = \{/.test(page), "no example of a style inline in the page");
 
-  // The two things in a filter that get everybody.
-  assert.ok(/kind<\/code> is the coarse name/.test(page), "the kind vocabulary is not explained");
-  for (const kind of ["highway", "major_road", "minor_road", "path", "rail"]) {
-    assert.ok(page.includes(kind), `the roads kind ${kind} is not listed`);
-  }
-  for (const detail of ["motorway", "primary", "residential"]) {
-    assert.ok(page.includes(detail), `${detail} is not named as a kind_detail`);
-  }
-  assert.ok(page.includes("kind_detail"), "kind_detail is not named at all");
-
-  // The minzoom rules, including the one that cost the address layer its chance.
-  assert.ok(/A layer is not drawn below its own <code>minzoom/.test(page),
-    "the layer minzoom rule is not explained");
-  assert.ok(page.includes("The archive stops at z15"), "the z15 ceiling is not stated");
-
-  // The silence of a blank layer, which is what made all of this hard to find.
-  assert.ok(/a layer that draws nothing is not an error/i.test(page),
-    "the page does not say that a blank layer is silent");
-
-  // Colours: a paint block a reader can copy the shape of.
-  assert.ok(page.includes('"line-color"'), "no line colour example");
-  assert.ok(page.includes('"text-color"'), "no text colour example");
-
-  // And the freshness claim is current, not the old "not being refreshed".
+  // The freshness section was removed, so no old schedule claim may remain.
   assert.ok(!page.includes("is not being refreshed"), "the page still says the archive is not refreshed");
-  assert.ok(page.includes("rebuilt once a month"), "the page does not say the copy is rebuilt once a month");
 });
 
 await check("every label and halo clears the WCAG AA text bar", async () => {
