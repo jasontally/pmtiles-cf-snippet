@@ -254,8 +254,8 @@ export const TOGGLE_GROUPS = [
   { id: "landuse", label: "Land use", layers: ["landuse"] },
   { id: "water", label: "Water", layers: ["water", "water-line"] },
   { id: "boundaries", label: "Boundaries", layers: ["boundary-region", "boundary-country"] },
-  { id: "roads", label: "Roads", layers: PLACE_IDS },
-  { id: "buildings", label: "Buildings", layers: ["buildings"] },
+  { id: "roads", label: "Roads", layers: [...PLACE_IDS, "road-shield"] },
+  { id: "buildings", label: "Buildings", layers: ["buildings", "address-label"] },
   { id: "labels", label: "Place labels", layers: [...PLACE_LAYER_IDS, "poi"] },
   // Names of things. A map with shapes and no names is a background.
   { id: "waterNames", label: "Water names", layers: ["water-label-ocean", "water-label-lake", "water-label-river"] },
@@ -268,16 +268,16 @@ export const TOGGLE_GROUPS = [
 /**
  * Layers that stay in the style but get no toggle.
  *
- * Both of these need a field the archive being served does not carry, and both
- * drew nothing in 2208 sampled tiles and nothing in a browser at z1 through z15.
- * A toggle for a layer that cannot draw is worse than no toggle: it looks broken
- * and there is no way for a visitor to tell it from a real fault, which is the
- * same problem the zoom badges exist to solve.
+ * `place-settlement` is not in the style at all, because its kind is not in the
+ * archive. It stays named here so the test keeps checking that it does not come
+ * back.
  *
- * They stay in the style, filtered on ["has", field], so they start drawing on
- * their own the day a refresh brings the field in. No release, no second edit.
+ * `road-shield` and `address-label` were here while the archive lacked
+ * `shield_text` and `addr_housenumber`. The current archive carries both fields,
+ * so they now have toggles. They stay in the style, filtered on ["has", field],
+ * so a build without the field still draws nothing instead of a blank label.
  */
-export const TOGGLE_EXCLUSIONS = ["place-settlement", "road-shield", "address-label"];
+export const TOGGLE_EXCLUSIONS = ["place-settlement"];
 
 /**
  * The palette keys the page exposes as colour inputs, grouped for the form.
@@ -807,15 +807,12 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
 
   // ---- route shields ----
   //
-  // Waits for roads.shield_text, which the archive being served does not carry. It
-  // has shield_text_length, which is how many characters the number is and not what
-  // they are, so a shield drawn from that would be a blank shape on every motorway.
-  //
-  // `has` is what makes waiting safe. `["get", "shield_text"]` on an absent property
-  // is null, and null compares equal to a disheartening number of things, so the
-  // usual filter would match everything. `has` is true only when the property is
-  // genuinely there, so this draws nothing today and draws itself the moment the
-  // archive is refreshed.
+  // The current archive carries roads.shield_text, so this layer draws. The `has`
+  // test stays: ["get", "shield_text"] on an absent property is null, and null
+  // compares equal to a disheartening number of things, so the usual filter would
+  // match everything. `has` is true only when the property is genuinely there, so
+  // a build without the field draws nothing instead of a blank shield on every
+  // motorway.
   layers.push({
     id: "road-shield",
     type: "symbol",
@@ -849,9 +846,9 @@ export function buildStyle(flavor, palette = FLAVORS[flavor]) {
 
   // ---- house numbers ----
   //
-  // Waits for buildings.addr_housenumber. Not a separate source layer: Protomaps
-  // puts address points inside buildings with kind=address, so there is no second
-  // thing to fetch. Same `has` test, same reasoning.
+  // The current archive carries buildings.addr_housenumber. Not a separate source
+  // layer: Protomaps puts address points inside buildings with kind=address, so
+  // there is no second thing to fetch. Same `has` test, same reasoning.
   layers.push({
     id: "address-label",
     type: "symbol",

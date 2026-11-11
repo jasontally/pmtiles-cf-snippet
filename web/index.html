@@ -523,22 +523,11 @@ new maplibregl.Map({ container: <span class="s">"map"</span>, style: myStyle, zo
         <tr><td>Shapes, roads, buildings, water, land</td><td><code>earth</code>, <code>landcover</code>, <code>landuse</code>, <code>water</code>, <code>roads</code>, <code>buildings</code></td><td>yes</td></tr>
         <tr><td>Place, road and water names</td><td>the <code>name</code> field on those same layers</td><td>yes</td></tr>
         <tr><td>Point of place icons, townspots</td><td><code>pois.kind</code>, <code>places</code>, plus the sprite</td><td>yes</td></tr>
-        <tr><td>Route shields</td><td><code>roads.shield_text</code></td><td>no. The build being served does not have that field</td></tr>
-        <tr><td>House numbers</td><td><code>buildings.kind=address</code> and <code>buildings.addr_housenumber</code></td><td>no, same reason</td></tr>
+        <tr><td>Route shields</td><td><code>roads.shield_text</code></td><td>yes</td></tr>
+        <tr><td>House numbers</td><td><code>buildings.kind=address</code> and <code>buildings.addr_housenumber</code></td><td>yes</td></tr>
       </tbody>
     </table>
   </div>
-  <p>
-    There is no separate address archive, and there is no address layer to fetch. The
-    upstream project puts address points <em>inside</em> the <code>buildings</code>
-    layer, as features with <code>kind=address</code> and an
-    <code>addr_housenumber</code>. That field arrived in a later Protomaps build than
-    the one this map is serving, so the house number layer is built and switches
-    itself on when the next monthly refresh brings them in. The same is true of the
-    shield text: the current build carries <code>shield_text_length</code>, which is
-    how many characters a route number is and not what they are, so a shield drawn
-    from it would be a blank shape on every motorway.
-  </p>
 
     <h3>Writing a layer yourself, and colouring it</h3>
     <p>

@@ -632,22 +632,14 @@ await check("a published style carries no placeholder", () => {
 });
 
 await check("no layer is in a toggle and also excluded from one", () => {
-  // These are the three layers that stay in the style and get no toggle, and the
-  // page does not offer them. The test exists because the reverse mistake is easy:
-  // a toggle for a layer that cannot draw, which looks broken and invites the
-  // visitor to think the map is at fault.
+  // place-settlement is the one layer that stays out of the builder, because its
+  // kind is not in the archive. The test exists because the reverse mistake is
+  // easy: a toggle for a layer that cannot draw, which looks broken and invites
+  // the visitor to think the map is at fault.
   const style = JSON.parse(readFileSync(join(HERE, "..", "public", "styles", "bright.json"), "utf8"));
   const ids = new Set(style.layers.map((l) => l.id));
   for (const excluded of TOGGLE_EXCLUSIONS) {
-    // Two different reasons for the same state, and they are not interchangeable.
-    // place-settlement is gone outright, because its kind does not exist in the
-    // archive. The other two ship and are filtered on ["has", field], so they draw
-    // themselves when a refresh brings the field in.
-    if (excluded === "place-settlement") {
-      assert.ok(!ids.has(excluded), `${excluded} is back, and its kind is not in the archive`);
-    } else {
-      assert.ok(ids.has(excluded), `${excluded} is excluded but no longer in the style`);
-    }
+    assert.ok(!ids.has(excluded), `${excluded} is back, and its kind is not in the archive`);
     const covered = TOGGLE_GROUPS.find((g) => g.layers.includes(excluded));
     assert.ok(!covered, `${excluded} is excluded from the builder but still under a toggle`);
   }
@@ -877,22 +869,17 @@ await check("the shoreline is an outline on the water, not a redraw of the land"
   }
 });
 
-await check("a layer waiting on a field names it, and the page says so", () => {
-  // A toggle that is correct and silent reads as broken. These two draw nothing until
-  // the archive carries a field, so they have to say so rather than look dead.
+await check("no toggle waits on a field, and the page names the fields", () => {
+  // The archive carries shield_text and addr_housenumber now, so a toggle that
+  // says it needs a field would tell the visitor to wait for data that is here.
   const builder = readBuilder();
   for (const toggle of builder.toggles) {
-    if (!toggle.needs) continue;
-    assert.ok(/^[a-z]+\.[a-z_]+$/.test(toggle.needs), `${toggle.id} needs is not a layer.field: ${toggle.needs}`);
-    const [layer, field] = toggle.needs.split(".");
-    // The archive's own field list, over HTTP, is the only honest source for this.
-    // Offline, the check is that the field is named and the page renders it.
+    assert.ok(!toggle.needs, `${toggle.id} still needs ${toggle.needs}`);
   }
   const page = readFileSync(join(HERE, "index.html"), "utf8");
-  assert.ok(page.includes("needs "), "the page does not show which layer needs what");
-  assert.ok(page.includes("addr_housenumber"), "the page does not name the missing house number field");
-  assert.ok(page.includes("shield_text"), "the page does not name the missing shield text field");
-  assert.ok(page.includes("inside"), "the page does not say the address points are inside buildings");
+  assert.ok(page.includes("addr_housenumber"), "the page does not name the house number field");
+  assert.ok(page.includes("shield_text"), "the page does not name the shield text field");
+  assert.ok(page.includes("buildings.kind=address"), "the page does not say the address points come from the buildings layer");
 });
 
 await check("every icon the styles ask for is in the sprite", () => {
