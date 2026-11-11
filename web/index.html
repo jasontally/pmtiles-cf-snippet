@@ -258,9 +258,41 @@
   .quote p + p { margin-top: .4rem; }
   .swatch { display: inline-block; width: .8rem; height: .8rem; border-radius: 3px; border: 1px solid rgba(0,0,0,.2); vertical-align: -1px; }
   footer { margin-top: 4rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .88rem; }
+
+  /* The section index. It is built from the page's own h2 headings, so it needs
+     no separate translation. It sits outside the reading column and only appears
+     when the viewport has room for both. */
+  .toc { display: none; }
+  @media (min-width: 85rem) {
+    .toc:not(:empty) {
+      display: block;
+      position: fixed;
+      inset-inline-start: max(1rem, calc((100vw - var(--max)) / 2 - 11rem));
+      top: 5rem;
+      width: 9.5rem;
+      max-height: calc(100vh - 10rem);
+      overflow: auto;
+      padding: .55rem;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      box-shadow: 0 8px 24px rgba(0,0,0,.08);
+      font-size: .84rem;
+      z-index: 4;
+    }
+    .toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+    .toc a {
+      display: block; padding: .32rem .5rem; border-radius: 6px;
+      color: var(--muted); text-decoration: none; line-height: 1.35;
+    }
+    .toc a:hover { background: var(--code-bg); color: var(--ink); }
+    .toc a[aria-current="true"] { background: var(--code-bg); color: var(--accent); font-weight: 600; }
+  }
+  @media print { .toc { display: none; } }
 </style>
 </head>
 <body>
+<nav class="toc" id="toc" aria-label=""></nav>
 <main class="wrap">
 
 <header class="hero">
@@ -1450,6 +1482,66 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
     setHint(t("ui.startError", { error }));
     console.error(error);
   });
+})();
+</script>
+<script>
+(function () {
+  "use strict";
+  var nav = document.getElementById("toc");
+  var main = document.querySelector("main");
+  if (!nav || !main) return;
+
+  var sections = [];
+  var links = {};
+  var list = document.createElement("ul");
+  var headings = main.querySelectorAll("section > h2");
+  for (var i = 0; i < headings.length; i++) {
+    var section = headings[i].closest("section");
+    if (!section || !section.id) continue;
+    var a = document.createElement("a");
+    a.href = "#" + section.id;
+    a.textContent = headings[i].textContent.trim();
+    var li = document.createElement("li");
+    li.appendChild(a);
+    list.appendChild(li);
+    sections.push(section);
+    links[section.id] = a;
+  }
+  if (!sections.length) return;
+
+  nav.appendChild(list);
+  nav.setAttribute("aria-label", document.title);
+
+  var current = "";
+  function paint() {
+    var id = sections[0].id;
+    for (var i = 0; i < sections.length; i++) {
+      if (sections[i].getBoundingClientRect().top <= 120) id = sections[i].id;
+    }
+    if (id === current) return;
+    if (links[current]) links[current].removeAttribute("aria-current");
+    if (links[id]) links[id].setAttribute("aria-current", "true");
+    current = id;
+  }
+  var queued = false;
+  function onScroll() {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(function () { queued = false; paint(); });
+  }
+  nav.addEventListener("click", function (event) {
+    var link = event.target.closest && event.target.closest("a");
+    if (!link) return;
+    var id = link.getAttribute("href").slice(1);
+    if (!links[id]) return;
+    if (links[current]) links[current].removeAttribute("aria-current");
+    link.setAttribute("aria-current", "true");
+    current = id;
+  });
+  window.addEventListener("scroll", onScroll, { passive: true });
+  window.addEventListener("resize", onScroll, { passive: true });
+  window.addEventListener("hashchange", onScroll);
+  paint();
 })();
 </script>
 </body>
