@@ -270,7 +270,7 @@
       inset-inline-start: max(1rem, calc((100vw - var(--max)) / 2 - 11rem));
       top: 5rem;
       width: 9.5rem;
-      max-height: calc(100vh - 10rem);
+      max-height: calc(100vh - 8rem);
       overflow: auto;
       padding: .55rem;
       background: var(--panel);
@@ -281,6 +281,12 @@
       z-index: 4;
     }
     .toc ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .1rem; }
+    .toc > ul > li > a { color: var(--ink); font-weight: 600; }
+    .toc ul ul {
+      margin: .1rem 0 .2rem; padding-inline-start: .55rem;
+      border-inline-start: 1px solid var(--line); gap: .05rem;
+    }
+    .toc ul ul a { font-size: .78rem; padding: .22rem .45rem; font-weight: 400; color: var(--muted); }
     .toc a {
       display: block; padding: .32rem .5rem; border-radius: 6px;
       color: var(--muted); text-decoration: none; line-height: 1.35;
@@ -763,14 +769,14 @@ console.log(tile.data.byteLength);</code></pre>
     add them in <code>map.on("load", …)</code>.
   </p>
 
-  <h3>“archive contains MVT vector tiles, but leafletRasterLayer is for displaying raster tiles”</h3>
+  <h3 data-toc-skip>“archive contains MVT vector tiles, but leafletRasterLayer is for displaying raster tiles”</h3>
   <p>
     That is <code>pmtiles.leafletRasterLayer</code>, which draws raster PMTiles as
     images. These are vector tiles, so it refuses them. No option changes that, and
     there is no raster copy here. Use one of the options above.
   </p>
 
-  <h3>“download.openstreetmap.fr returned 403”</h3>
+  <h3 data-toc-skip>“download.openstreetmap.fr returned 403”</h3>
   <p>
     That is an extract and replication mirror, not a tile server. In October 2026 it
     blocked addresses after abusive downloads, and the operators said they would
@@ -1491,32 +1497,57 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
   var main = document.querySelector("main");
   if (!nav || !main) return;
 
-  var sections = [];
+  var targets = [];
   var links = {};
   var list = document.createElement("ul");
-  var headings = main.querySelectorAll("section > h2");
-  for (var i = 0; i < headings.length; i++) {
-    var section = headings[i].closest("section");
-    if (!section || !section.id) continue;
+
+  function makeLink(heading, id) {
     var a = document.createElement("a");
-    a.href = "#" + section.id;
-    a.textContent = headings[i].textContent.trim();
-    var li = document.createElement("li");
-    li.appendChild(a);
-    list.appendChild(li);
-    sections.push(section);
-    links[section.id] = a;
+    a.href = "#" + id;
+    a.textContent = heading.textContent.trim();
+    links[id] = a;
+    return a;
   }
-  if (!sections.length) return;
+
+  var sections = main.querySelectorAll("section");
+  for (var i = 0; i < sections.length; i++) {
+    var section = sections[i];
+    if (!section.id) continue;
+    var h2 = section.querySelector("h2");
+    if (!h2) continue;
+
+    var li = document.createElement("li");
+    li.appendChild(makeLink(h2, section.id));
+    targets.push({ id: section.id, el: h2 });
+
+    var sub = null;
+    var h3s = section.querySelectorAll("h3");
+    for (var j = 0; j < h3s.length; j++) {
+      var h3 = h3s[j];
+      if (h3.hasAttribute("data-toc-skip")) continue;
+      var id = h3.id || section.id + "-" + (j + 1);
+      h3.id = id;
+      if (!sub) {
+        sub = document.createElement("ul");
+        li.appendChild(sub);
+      }
+      var subLi = document.createElement("li");
+      subLi.appendChild(makeLink(h3, id));
+      sub.appendChild(subLi);
+      targets.push({ id: id, el: h3 });
+    }
+    list.appendChild(li);
+  }
+  if (!targets.length) return;
 
   nav.appendChild(list);
   nav.setAttribute("aria-label", document.title);
 
   var current = "";
   function paint() {
-    var id = sections[0].id;
-    for (var i = 0; i < sections.length; i++) {
-      if (sections[i].getBoundingClientRect().top <= 120) id = sections[i].id;
+    var id = targets[0].id;
+    for (var i = 0; i < targets.length; i++) {
+      if (targets[i].el.getBoundingClientRect().top <= 120) id = targets[i].id;
     }
     if (id === current) return;
     if (links[current]) links[current].removeAttribute("aria-current");
@@ -1541,6 +1572,10 @@ import { renderTemplate, packEdits, unpackEdits, hasUnfilled } from "/styles/ren
   window.addEventListener("scroll", onScroll, { passive: true });
   window.addEventListener("resize", onScroll, { passive: true });
   window.addEventListener("hashchange", onScroll);
+  if (location.hash) {
+    var initial = document.getElementById(location.hash.slice(1));
+    if (initial) initial.scrollIntoView();
+  }
   paint();
 })();
 </script>
