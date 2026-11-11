@@ -58,6 +58,7 @@
     --accent: #1d6f5c;
     --code-bg: #f3f1ea;
     --max: 62rem;
+    --toc-w: 11rem;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -261,15 +262,17 @@
 
   /* The section index. It is built from the page's own h2 headings, so it needs
      no separate translation. It sits outside the reading column and only appears
-     when the viewport has room for both. */
+     when the viewport has room for both.
+     The reading column has 1.25rem of padding, so stopping at its edge leaves
+     the same 1.25rem gap a reader sees between the map and the builder. */
   .toc { display: none; }
-  @media (min-width: 85rem) {
+  @media (min-width: 87.5rem) {
     .toc:not(:empty) {
       display: block;
       position: fixed;
-      inset-inline-start: max(1rem, calc((100vw - var(--max)) / 2 - 11rem));
+      inset-inline-start: max(1rem, calc(50% - 31rem - var(--toc-w)));
       top: 5rem;
-      width: 9.5rem;
+      width: var(--toc-w);
       max-height: calc(100vh - 8rem);
       overflow: auto;
       padding: .55rem;
